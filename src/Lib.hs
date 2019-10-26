@@ -1,6 +1,9 @@
 module Lib
-    ( someFunc
+    ( rep
     ) where
 
-someFunc :: IO ()
-someFunc = putStrLn "someFunc"
+import Lexer
+import Parser
+
+rep :: String -> IO ()
+rep s = print $ parse (many token) s
