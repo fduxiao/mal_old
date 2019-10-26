@@ -14,7 +14,20 @@ type Title = String
 
 type Desc = String
 
-data ParsingError = EOF | UnexpectedChar Char | UnexpectedToken String | Error Title Desc | Zero | UnendedString deriving(Show)
+data ParsingError = 
+    UnexpectedEOF 
+    | UnexpectedChar Char 
+    | UnexpectedToken String 
+    | Error Title Desc 
+    | Zero 
+    | UnendedString deriving(Eq)
+
+instance Show ParsingError where
+    show UnexpectedEOF = "Unexpected EOF"
+    show (UnexpectedChar ch) = "Unexpected Char: " ++ [ch]
+    show (UnexpectedToken s) = "Unexpected Token: " ++ s
+    show (Error t d) = t ++ ": " ++ d
+    show UnendedString = "UnendedString"
 
 data Context = Context {
     pos :: Int,
@@ -35,7 +48,7 @@ type ParsingResult a = (Either ParsingError a, Context)
 
 showResult :: (Show a) => ParsingResult a -> String
 showResult (Left e, context) = show context ++ " : " ++ show e
-showResult (Right v, context) = show context ++ " : " ++ show v
+showResult (Right v, context) = show v
 
 newtype Parser a =  Parser {runParser :: Context -> ParsingResult a}
 
@@ -80,8 +93,8 @@ put s = Parser $ const (Right (), s)
 throw :: ParsingError -> Parser a
 throw err = Parser $ (,) $ Left err
 
-except :: Parser a -> (ParsingError -> Parser a) -> Parser a
-except code except = Parser $ \context ->
+except :: (ParsingError -> Parser a) -> Parser a -> Parser a
+except except code = Parser $ \context ->
     case runParser code context of
         (Left e, context') -> runParser (except e) context'
         a -> a
@@ -89,7 +102,7 @@ except code except = Parser $ \context ->
 try :: Parser a -> Parser a
 try p = do
     context <- get
-    except p $ \err -> do
+    flip except p $ \err -> do
         put context  -- maintain old state
         throw err
 
@@ -110,7 +123,7 @@ pick :: Parser Char
 pick = do
     context <- get 
     case at context of
-        Nothing -> throw EOF
+        Nothing -> throw UnexpectedEOF
         Just ch -> return ch
 
 
@@ -139,8 +152,8 @@ char ch = sat (== ch)
 string :: String -> Parser String
 string = mapM char
 
-zeroOne :: Parser String -> Parser String
-zeroOne p = p <|> return ""
+zeroOne :: Parser a -> Parser [a]
+zeroOne p = ((:[]) <$> p) <|> return []
 
 (<<) :: Monad m => m a -> m b -> m a
 a << b = do
