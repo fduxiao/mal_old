@@ -1,36 +1,10 @@
 module Reader where
 
 import Lexer
+import Control.Monad
+import Data.Char
 import Parser
-
-data MalAtom = 
-    Symbol String 
-    | MalString String
-    | Number Integer 
-    | Floating Float 
-    | Nil
-    | Boolean Bool
-    deriving(Eq)
-
-instance Show MalAtom where
-    show (Symbol s) = ':':s
-    show (MalString s) = show s
-    show (Number i) = show i
-    show (Floating f) = show f
-    show Nil = "nil"
-    show (Boolean b) = if b then "true" else "false"
-
-data Mal = MalAtom MalAtom | MalList [Mal] | Var String | Comment String deriving(Eq)
-instance Show Mal where
-    show (MalAtom a) = show a
-    show (Var v) = v
-    show (MalList l) = handle l where
-        handle [] = "nil"
-        handle (x:xs) = '(':show x ++ concatMap (\t -> ' ':show t) xs ++ ")"
-    show (Comment c) = ""
-
-atom :: MalAtom -> Parser Mal
-atom = return . MalAtom
+import AST
 
 readForm :: Parser Mal
 readForm = do
@@ -47,7 +21,23 @@ commentLine = Comment <$> semicomma
 readMalList :: Parser Mal
 readMalList = paren (MalList <$> many readForm)
 
-readMalAtom:: Parser Mal
+parseFloat :: Parser Float
+parseFloat = do
+    n1 <- digits
+    dot <- char '.'
+    n2 <- digits
+    case n1 ++ dot:n2 of
+        "." -> throw $ UnexpectedChar '.'
+        a -> return $ read a
+
+parseNumberFloat :: String -> Parser Mal
+parseNumberFloat s = newContext $ do
+    put $ Context 0 s
+    r <- (MalAtom . Floating <$> parseFloat) <|> (MalAtom . Number . read <$> digits)
+    eof
+    return r
+
+readMalAtom :: Parser Mal
 readMalAtom = do
     t <- token
     case t of
@@ -56,8 +46,9 @@ readMalAtom = do
             case s of 
                 "nil" -> atom Nil
                 "true" -> atom $ Boolean True
+                "false" -> atom $ Boolean False
                 (':':a) -> atom $ Symbol a
-                a -> return $ Var a
+                a -> parseNumberFloat a <|> return (Var a)
         t -> throwToken t
 
 contents :: Parser a -> Parser a

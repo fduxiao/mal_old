@@ -169,3 +169,10 @@ sep1 a s = (:) <$> a <*> ((s >> sep a s) <|> return [])
 
 oneOf :: [Parser a] -> Parser a
 oneOf = foldr (<|>) mzero
+
+newContext :: Parser a -> Parser a
+newContext p = do
+    context <- get
+    r <- p
+    put context
+    return r
