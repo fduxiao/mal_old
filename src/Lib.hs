@@ -3,20 +3,28 @@ module Lib
     ) where
 
 import Reader
-import Parser
-import Lexer
 import Eval
-import AST
+import Data.Map as Map
+import Control.Monad.State
 
-wrap :: Parser Mal -> String -> String
-wrap p s = case parse ((zeroOne commentLine >> eof >> return Nothing) <|> (Just <$> contents p)) s of
-    (Right Nothing, _) -> ""
-    r@(Left _, _) -> showResult r  ++ "\n"
-    (Right (Just a), c) -> case runEval (eval a) defaultEnv of
-        Left e -> show e ++ "\n"
-        Right (r, _) -> show r ++ "\n"
+wrap :: Parser Mal -> Parser (Maybe Mal)
+wrap p = (zeroOne commentLine >> eof >> return Nothing) <|> (Just <$> contents p)
 
-    
+printEvalError :: (EvalError, Env) -> IO ()
+printEvalError (err, env) = printCallStack env >> print err
+    where
+        printCallStack [] = return ()
+        printCallStack xxs = sequence_ $ do
+            x <- reverse xxs
+            return $ print x
+
 
 rep :: String -> IO ()
-rep s = putStr $ wrap readForm s
+rep s = case parse (wrap readForm) s of -- parse
+    r@(Left _, _) -> putStrLn $ showResult r
+    (Right Nothing, _) -> putStr ""
+    (Right (Just a), _) -> -- eval
+        case runEval2 (eval a) defaultEnv of
+            Right (r, _) -> print r
+            Left e -> printEvalError e
+

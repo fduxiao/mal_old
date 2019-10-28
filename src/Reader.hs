@@ -1,9 +1,12 @@
-module Reader where
+module Reader (
+    module Reader,
+    module Lexer
+) where
 
+import Parser
 import Lexer
 import Control.Monad
 import Data.Char
-import Parser
 import AST
 
 readForm :: Parser Mal

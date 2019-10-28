@@ -1,4 +1,7 @@
-module Lexer where
+module Lexer (
+    module Lexer,
+    module Parser
+) where
 
 import Data.Char
 import Parser
