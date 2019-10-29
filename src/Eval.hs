@@ -5,87 +5,71 @@ module Eval (
     module Env
 ) where
 
-import Control.Monad.State
-import Control.Monad
-import Control.Applicative
 import AST
 import Env
 
 defaultEnv :: Env
-defaultEnv = [("top", defnFromList [
+defaultEnv = Env {
+    defn = [defnFromList [
         ("+", Func "+" $ (MalAtom<$>) . addMany),
         ("-", Func "-" $ (MalAtom<$>) . minusMany),
         ("*", Func "*" $ (MalAtom<$>) . timesMany),
         ("/", Func "/" $ (MalAtom<$>) . divideMany),
         ("throw", Func "throw" $ \case
-            [x] -> Left $ MalError x
-            _ -> Left . MalError $ MalString "Wrong arguments number")
-    ])]
+            [x] -> throwAtom x
+            _ -> throwAtom $ MalString "Wrong arguments number"),
+        ("symbols", Func "symbols" $ const printSymbol),
+        ("print", Func "print" malPrint)
+    ]],
+    callStack = [],
+    traceback = []
+}
 
-type Reduce = StateT Env (Either (EvalError, Env))
+malPrint :: [MalAtom] -> Eval Mal
+malPrint xs = liftIO $ mapM_ print xs >> atom Nope
 
-newtype Eval a = Eval {runEval :: Env -> IO (Either EvalError a, Env)}
+printSymbol :: Eval Mal
+printSymbol = do
+    env <- getEnv
+    liftIO . print $ mergeDefn env
+    atom Nope
 
-instance Monad Eval where
-    return a = Eval $ \env -> return (Right a, env)
-    (Eval ma) >>= f = Eval $ \env -> do
-        (result, env') <- ma env
-        case result of
-            Left e -> return (Left e, env')
-            Right a -> runEval (f a) env'
+catch :: Eval a -> (EvalError -> Eval a) -> Eval a
+catch (Eval ea) handle = Eval $ \env -> do
+    (a, env') <- ea env
+    case a of
+        Left e -> runEval (handle e) env'
+        Right a -> return (Right a, env')
 
-instance MonadIO Eval where
-    liftIO io = Eval $ \env -> do
-        a <- io
-        return (Right a, env)
+ensureCallStack :: CallStack -> Eval a -> Eval a
+ensureCallStack stack (Eval p) = Eval $ \env -> do
+    (a, env) <- p (pushCallStack stack env)
+    return (a, popCallStack env)
 
-getEnv :: Eval Env
-getEnv = Eval $ \env -> return (Right env, env)
-
-putEnv :: Env -> Eval ()
-putEnv env = Eval $ \_ -> return (Right (), env)
-
-instance Applicative Eval where
-    pure = return
-    f <*> a = f >>= (<$>a)
-
-instance Functor Eval where
-    fmap f a = a >>= (return . f)
-
-
-throw :: EvalError -> Reduce a
-throw e = do
-    env <- get
-    lift $ Left (e, env)
-
-reduce :: Mal -> Reduce Mal
+reduce :: Mal -> Eval Mal
 reduce (MalAtom a) = atom a
 reduce (Var a) = do
-    env <- get
+    env <- getEnv
     case find env a of 
         Nothing -> throw $ UndefinedSymbol a
         Just a -> atom a
 
+reduce Empty = atom Nope
 reduce (MalList []) = atom Nil
 reduce (MalList (x:xs)) = do
     f <- eval x
     r <- case f of 
-        (Func n a) -> do
-            modify $ pushEmptyDefn n
+        (Func n a) -> ensureCallStack n $ do
+            modifyEnv $ pushTraceback n
             args <- mapM eval xs
-            case a args of
-                Right d -> return d
-                Left e -> throw e
+            a args
         _ -> throw $ NotAFunction $ show f
-    modify popDefn
+    modifyEnv popTraceback
     return r
 
-eval :: Mal -> Reduce MalAtom
+eval :: Mal -> Eval MalAtom
 eval e = do
     d <- reduce e
     case d of
         MalAtom a -> return a
         b -> eval b
-
-runEval2 :: Reduce a -> Env -> Either (EvalError, Env) (a, Env)
-runEval2 = runStateT

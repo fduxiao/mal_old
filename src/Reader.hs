@@ -1,21 +1,30 @@
 module Reader (
     module Reader,
-    module Lexer
+    parse, showResult
 ) where
 
 import Parser
 import Lexer
 import Control.Monad
 import Data.Char
-import AST
+import AST (Mal(..), MalAtom(..), atom)
 
 readForm :: Parser Mal
 readForm = do
     t <- peek
-    case t of 
+    case t of
         SpecialChar '(' -> readMalList
         SemiComma _ -> token >> readForm  -- ignored by readForm
         EOF -> throw UnexpectedEOF
+        _ -> readMalAtom
+
+readFormWithEmpty :: Parser Mal
+readFormWithEmpty = do
+    t <- peek
+    case t of
+        SpecialChar '(' -> readMalList
+        SemiComma _ -> token >> readFormWithEmpty  -- ignored by readForm
+        EOF -> return Empty
         _ -> readMalAtom
 
 commentLine :: Parser Mal
@@ -46,7 +55,7 @@ readMalAtom = do
     case t of
         StringLiteral s -> atom $ MalString s
         NonSpecialChars s ->
-            case s of 
+            case s of
                 "nil" -> atom Nil
                 "true" -> atom $ Boolean True
                 "false" -> atom $ Boolean False
