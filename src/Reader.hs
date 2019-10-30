@@ -30,8 +30,25 @@ readFormWithEmpty = do
 commentLine :: Parser Mal
 commentLine = Comment <$> semicomma
 
+parseLetArgs :: [Mal] -> Parser [(String, Mal)]
+parseLetArgs [] = return []
+parseLetArgs (Var name:value:rest) = ((name, value):) <$> parseLetArgs rest
+parseLetArgs _ = throw $ Error "LetError" "Wrong binging pairs"
+
 readMalList :: Parser Mal
-readMalList = paren (MalList <$> many readForm)
+readMalList = paren $ do
+    t <- peek
+    case t of
+        NonSpecialChars "def!" -> do
+            token
+            name <- nonspecialChars
+            MalDef name <$> readForm
+        NonSpecialChars "let*" -> do
+            token
+            params <- paren $ many readForm
+            defs <- parseLetArgs params
+            Let defs <$> readForm
+        _ -> MalList <$> many readForm
 
 parseFloat :: Parser Float
 parseFloat = do

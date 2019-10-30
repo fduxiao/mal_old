@@ -84,6 +84,8 @@ data Mal =
     | Var String 
     | Comment String
     | MalIO (IO MalAtom)
+    | MalDef String Mal
+    | Let [(String, Mal)] Mal
     | Empty
 
 instance Show Mal where
@@ -94,6 +96,7 @@ instance Show Mal where
         handle (x:xs) = '(':show x ++ concatMap (\t -> ' ':show t) xs ++ ")"
     show (Comment c) = ""
     show Empty = ""
+    show (MalDef s mal) = "(def! " ++ s ++ show mal ++ " )"
 
 atom :: (Monad m) => MalAtom -> m Mal
 atom = return . MalAtom

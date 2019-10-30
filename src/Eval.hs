@@ -41,10 +41,15 @@ catch (Eval ea) handle = Eval $ \env -> do
         Left e -> runEval (handle e) env'
         Right a -> return (Right a, env')
 
-ensureCallStack :: CallStack -> Eval a -> Eval a
-ensureCallStack stack (Eval p) = Eval $ \env -> do
-    (a, env) <- p (pushCallStack stack env)
-    return (a, popCallStack env)
+withCallStack :: CallStack -> Eval a -> Eval a
+withCallStack stack (Eval p) = Eval $ \env -> do
+    (a, env') <- p (pushCallStack stack env)
+    return (a, popCallStack env')
+
+withNewDefn :: Eval a -> Eval a
+withNewDefn (Eval p) = Eval $ \env -> do
+    (a, env') <- p (pushEmptyDefn env)
+    return (a, popDefn env')
 
 reduce :: Mal -> Eval Mal
 reduce (MalAtom a) = atom a
@@ -54,12 +59,26 @@ reduce (Var a) = do
         Nothing -> throw $ UndefinedSymbol a
         Just a -> atom a
 
+reduce (MalDef name expr) = do
+    r <- eval expr
+    modifyEnv $ setDefn name r
+    atom r
+
+reduce (Let xs expr) = withNewDefn (addDefn xs >> MalAtom <$> eval expr)
+    where
+        addDefn :: [(String, Mal)] -> Eval ()
+        addDefn [] = return ()
+        addDefn ((name, expr):rest) = do
+            value <- eval expr
+            modifyEnv $ setDefn name value
+            addDefn rest
+
 reduce Empty = atom Nope
 reduce (MalList []) = atom Nil
 reduce (MalList (x:xs)) = do
     f <- eval x
     r <- case f of 
-        (Func n a) -> ensureCallStack n $ do
+        (Func n a) -> withCallStack n $ do
             modifyEnv $ pushTraceback n
             args <- mapM eval xs
             a args
@@ -68,8 +87,8 @@ reduce (MalList (x:xs)) = do
     return r
 
 eval :: Mal -> Eval MalAtom
-eval e = do
-    d <- reduce e
+eval mal = do
+    d <- reduce mal
     case d of
         MalAtom a -> return a
         b -> eval b
