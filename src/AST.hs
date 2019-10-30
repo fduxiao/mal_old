@@ -19,7 +19,7 @@ data Env = Env {
     defn :: [Defn]
 }
 
-data EvalError = UndefinedSymbol String | NotAFunction String | MalError MalAtom deriving(Show)
+data EvalError = UndefinedSymbol String | NotAFunction String | MalError MalAtom | InvalidArgNumber deriving(Show)
 newtype Eval a = Eval {runEval :: Env -> IO (Either EvalError a, Env)}
 
 instance Monad Eval where
@@ -57,15 +57,23 @@ throw e = Eval $ \env -> return (Left e, env)
 throwAtom :: MalAtom -> Eval a
 throwAtom = throw . MalError
 
+joinString :: (Show a) => String -> [a] -> String
+joinString _ [] = ""
+joinString sep (x:xs) = show x ++ concatMap (\t -> sep ++ show t) xs
+
+showMalString :: (Show a) => [a] -> String
+showMalString [] = "nil"
+showMalString xs = "(" ++ joinString " " xs ++ ")"
+
 
 data MalAtom = 
     Symbol String 
     | MalString String
     | Number Integer 
+    | AtomList [MalAtom]
     | Floating Float 
-    | Nil
     | Boolean Bool
-    | Func String ([MalAtom] -> Eval Mal)  -- name and its definition
+    | Func (Maybe String) ([MalAtom] -> Eval MalAtom)  -- name and its definition
     | Nope
 
 instance Show MalAtom where
@@ -73,10 +81,11 @@ instance Show MalAtom where
     show (MalString s) = s
     show (Number i) = show i
     show (Floating f) = show f
-    show Nil = "nil"
+    show (AtomList xs) = '\'':showMalString xs
     show (Boolean b) = if b then "true" else "false"
-    show (Func n f) = "proc:" ++ n
-    show Nope = ""
+    show (Func Nothing f) = "#<proc>"
+    show (Func (Just n) f) = "#<proc:" ++ n ++ ">"
+    show Nope = "Nope"
 
 data Mal = 
     MalAtom MalAtom
@@ -87,16 +96,21 @@ data Mal =
     | MalDef String Mal
     | Let [(String, Mal)] Mal
     | Empty
+    | Do [Mal]
+    | If Mal Mal Mal
+    | Fn Mal Mal
 
 instance Show Mal where
     show (MalAtom a) = show a
     show (Var v) = v
-    show (MalList l) = handle l where
-        handle [] = "nil"
-        handle (x:xs) = '(':show x ++ concatMap (\t -> ' ':show t) xs ++ ")"
-    show (Comment c) = ""
-    show Empty = ""
+    show (MalList xs) = showMalString xs
+    show (Comment c) = "; " ++ c
+    show Empty = "Empty"
     show (MalDef s mal) = "(def! " ++ s ++ show mal ++ " )"
+    show (Do []) = "(Do)"
+    show (Do (x:xs)) = "(Do " ++ show x ++ concatMap (\t -> ' ':show t) xs ++ ")"
+    show (If a b c) = "(if " ++ show a ++ " " ++ show b ++ " " ++ show c ++ ")"
+    show (Fn a b) = "(fn* " ++ show a  ++ " " ++ show b ++ ")"
 
 atom :: (Monad m) => MalAtom -> m Mal
 atom = return . MalAtom

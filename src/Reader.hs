@@ -35,19 +35,28 @@ parseLetArgs [] = return []
 parseLetArgs (Var name:value:rest) = ((name, value):) <$> parseLetArgs rest
 parseLetArgs _ = throw $ Error "LetError" "Wrong binging pairs"
 
+readArgs :: Parser Mal
+readArgs = var <|> paren (MalList <$> some var)
+
 readMalList :: Parser Mal
 readMalList = paren $ do
     t <- peek
     case t of
         NonSpecialChars "def!" -> do
             token
-            name <- nonspecialChars
-            MalDef name <$> readForm
+            args <- readArgs
+            case args of
+                Var name -> MalDef name <$> readForm
+                (MalList (Var name:params)) -> MalDef name . Fn (MalList params) <$> readForm
+                form -> throw $ Error "InvalidParamForm" (show form)
         NonSpecialChars "let*" -> do
             token
             params <- paren $ many readForm
             defs <- parseLetArgs params
             Let defs <$> readForm
+        NonSpecialChars "do" -> token >> Do <$> some readForm
+        NonSpecialChars "if" -> token >> If <$> readForm <*> readForm <*> readForm
+        NonSpecialChars "fn*" -> token >> Fn <$> readArgs <*> readForm
         _ -> MalList <$> many readForm
 
 parseFloat :: Parser Float
@@ -73,12 +82,19 @@ readMalAtom = do
         StringLiteral s -> atom $ MalString s
         NonSpecialChars s ->
             case s of
-                "nil" -> atom Nil
+                "nil" -> atom $ AtomList []
                 "true" -> atom $ Boolean True
                 "false" -> atom $ Boolean False
                 (':':a) -> atom $ Symbol a
                 a -> parseNumberFloat a <|> return (Var a)
         t -> throwToken t
+
+var :: Parser Mal
+var = do
+    p <- readMalAtom
+    case p of
+        Var a -> return (Var a)
+        _ -> throw $ Error "InvalidPattern" "Not a variable"
 
 contents :: Parser a -> Parser a
 contents p = p << (zeroOne commentLine >> eof)

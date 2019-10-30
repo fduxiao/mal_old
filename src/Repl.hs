@@ -38,6 +38,6 @@ printEvalError err = do
 
 
 rep :: String -> Env -> IO ((), Env)
-rep s env = flip runRepl env $ case parse readFormWithEmpty s of
+rep s env = flip runRepl env $ case parse (contents readFormWithEmpty) s of
     r@(Left _, _) -> liftIO . putStrLn $ showResult r
     (Right a, _) -> evalToRepl $ eval a

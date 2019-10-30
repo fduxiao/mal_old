@@ -38,18 +38,27 @@ data Token = EOF
     | NonSpecialChars String 
     deriving(Show, Eq)
 
-tokenWithComment :: Parser Token
-tokenWithComment = spaces >>
+eof :: Parser Token
+eof = do
+    content <- get
+    case at content of
+        Nothing -> return EOF
+        _ -> nonEOFToken >>= throwToken
+
+nonEOFToken :: Parser Token
+nonEOFToken = spaces >>
     (string "~@" >> return WaveAt) <|> 
     (SpecialChar <$> sat (`elem` "[]{}()'`~^@")) <|>
-    except (\err -> if err == UnexpectedEOF then return EOF else throw err)
-        (do
-            ch  <- pick
-            case ch of
-                '"' -> StringLiteral <$> parseStringLiteral
-                ';' -> next >> SemiComma <$> many (sat (/= '\n'))
-                _ -> NonSpecialChars <$> some (sat p)
-                    where p x = not (isSpace x) && x `notElem` "[]{}()'\"`,;")
+    do
+        ch  <- pick
+        case ch of
+            '"' -> StringLiteral <$> parseStringLiteral
+            ';' -> next >> SemiComma <$> many (sat (/= '\n'))
+            _ -> NonSpecialChars <$> some (sat p)
+                where p x = not (isSpace x) && x `notElem` "[]{}()'\"`,;"
+
+tokenWithComment :: Parser Token
+tokenWithComment = nonEOFToken <|> eof
                 
 
 token :: Parser Token
@@ -108,6 +117,3 @@ nonspecialChars = satToken p where
 
 paren :: Parser a -> Parser a
 paren a = takeToken (SpecialChar '(') >> a << takeToken (SpecialChar ')')
-
-eof :: Parser Token
-eof = takeToken EOF

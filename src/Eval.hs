@@ -11,28 +11,28 @@ import Env
 defaultEnv :: Env
 defaultEnv = Env {
     defn = [defnFromList [
-        ("+", Func "+" $ (MalAtom<$>) . addMany),
-        ("-", Func "-" $ (MalAtom<$>) . minusMany),
-        ("*", Func "*" $ (MalAtom<$>) . timesMany),
-        ("/", Func "/" $ (MalAtom<$>) . divideMany),
-        ("throw", Func "throw" $ \case
+        ("+", Func (Just "+") addMany),
+        ("-", Func (Just "-") minusMany),
+        ("*", Func (Just "*") timesMany),
+        ("/", Func (Just "/") divideMany),
+        ("throw", Func (Just "throw") $ \case
             [x] -> throwAtom x
             _ -> throwAtom $ MalString "Wrong arguments number"),
-        ("symbols", Func "symbols" $ const printSymbol),
-        ("print", Func "print" malPrint)
+        ("symbols", Func (Just "symbols") $ const printSymbol),
+        ("print", Func (Just "print") malPrint)
     ]],
     callStack = [],
     traceback = []
 }
 
-malPrint :: [MalAtom] -> Eval Mal
-malPrint xs = liftIO $ mapM_ print xs >> atom Nope
+malPrint :: [MalAtom] -> Eval MalAtom
+malPrint xs = liftIO $ mapM_ print xs >> return Nope
 
-printSymbol :: Eval Mal
+printSymbol :: Eval MalAtom
 printSymbol = do
     env <- getEnv
     liftIO . print $ mergeDefn env
-    atom Nope
+    return Nope
 
 catch :: Eval a -> (EvalError -> Eval a) -> Eval a
 catch (Eval ea) handle = Eval $ \env -> do
@@ -51,6 +51,28 @@ withNewDefn (Eval p) = Eval $ \env -> do
     (a, env') <- p (pushEmptyDefn env)
     return (a, popDefn env')
 
+copyEnv :: Eval a -> Eval a
+copyEnv (Eval p) = Eval $ \env -> do
+    (r, _) <- p env
+    return (r, env)
+
+bindDefn :: [(String, Mal)] -> Eval ()
+bindDefn [] = return ()
+bindDefn ((name, expr):rest) = do
+    value <- eval expr
+    modifyEnv $ setDefn name value
+    bindDefn rest
+
+bindArgs :: Mal -> [MalAtom] -> Eval ()
+bindArgs (Var x) value = modifyEnv $ setDefn x (AtomList value)
+bindArgs (MalList []) [] = return ()
+bindArgs (MalList (Var x:xs)) (a:as) = modifyEnv (setDefn x a) >> bindArgs (MalList xs) as
+bindArgs _ _ = throw InvalidArgNumber
+
+parseName :: Maybe String -> String
+parseName Nothing = "lambda"
+parseName (Just s) = s
+
 reduce :: Mal -> Eval Mal
 reduce (MalAtom a) = atom a
 reduce (Var a) = do
@@ -61,30 +83,41 @@ reduce (Var a) = do
 
 reduce (MalDef name expr) = do
     r <- eval expr
+    r <- return $ case r of 
+        Func Nothing body -> Func (Just name) body 
+        _ -> r
     modifyEnv $ setDefn name r
     atom r
 
-reduce (Let xs expr) = withNewDefn (addDefn xs >> MalAtom <$> eval expr)
-    where
-        addDefn :: [(String, Mal)] -> Eval ()
-        addDefn [] = return ()
-        addDefn ((name, expr):rest) = do
-            value <- eval expr
-            modifyEnv $ setDefn name value
-            addDefn rest
+reduce (Let xs expr) = withNewDefn (bindDefn xs >> MalAtom <$> eval expr)
+reduce (Do [x]) = MalAtom <$> eval x
+reduce (Do (x:xs)) = eval x >> reduce (Do xs)
+
+reduce (If (MalAtom (Boolean False)) _ f) = MalAtom <$> eval f
+reduce (If _ t _) = MalAtom <$> eval t
+
+reduce (Fn params body) = atom . Func Nothing $ \args -> copyEnv $ do
+    bindArgs params args
+    env <- getEnv
+    value <- eval body
+    return $ case value of
+        (Func a b) -> Func a $ \args -> do
+            putEnv env
+            b args
+        x -> x
 
 reduce Empty = atom Nope
-reduce (MalList []) = atom Nil
+reduce (MalList []) = atom $ AtomList []
 reduce (MalList (x:xs)) = do
     f <- eval x
     r <- case f of 
-        (Func n a) -> withCallStack n $ do
-            modifyEnv $ pushTraceback n
+        (Func n a) -> withCallStack (parseName n) $ do
+            modifyEnv $ pushTraceback (parseName n)
             args <- mapM eval xs
             a args
         _ -> throw $ NotAFunction $ show f
     modifyEnv popTraceback
-    return r
+    atom r
 
 eval :: Mal -> Eval MalAtom
 eval mal = do
