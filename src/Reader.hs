@@ -35,8 +35,29 @@ parseLetArgs [] = return []
 parseLetArgs (Var name:value:rest) = ((name, value):) <$> parseLetArgs rest
 parseLetArgs _ = throw $ Error "LetError" "Wrong binging pairs"
 
+parseArbitraryArg :: Parser [Mal]
+parseArbitraryArg = do
+    name <- varName
+    if name /= "&" then throw $ Error "UnexpectedToken" name
+    else do
+        name2 <- varName
+        if name2 == "&" then throw $ Error "UnexpectedToken" name2 else return [Var name, Var name2]
+
+normalVar :: Parser Mal
+normalVar = do
+    name <- varName
+    if name == "&" then throw $ Error "UnexpectedToken" name else return (Var name)
+
+manyArgs :: Parser [Mal]
+manyArgs = do
+    ns <- many normalVar
+    rest <- parseArbitraryArg <|> return []
+    case ns ++ rest of
+        [] -> throw $ Error "EmptyArgs" "You should include at least one argument."
+        r -> return r
+
 readArgs :: Parser Mal
-readArgs = var <|> paren (MalList <$> some var)
+readArgs = var <|> paren (MalList <$> manyArgs)
 
 readMalList :: Parser Mal
 readMalList = paren $ do
@@ -89,12 +110,15 @@ readMalAtom = do
                 a -> parseNumberFloat a <|> return (Var a)
         t -> throwToken t
 
-var :: Parser Mal
-var = do
+varName :: Parser String
+varName = do
     p <- readMalAtom
     case p of
-        Var a -> return (Var a)
+        Var a -> return a
         _ -> throw $ Error "InvalidPattern" "Not a variable"
+
+var :: Parser Mal
+var = Var <$> varName
 
 contents :: Parser a -> Parser a
 contents p = p << (zeroOne commentLine >> eof)

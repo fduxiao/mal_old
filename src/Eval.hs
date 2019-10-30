@@ -7,32 +7,14 @@ module Eval (
 
 import AST
 import Env
+import Core
 
 defaultEnv :: Env
 defaultEnv = Env {
-    defn = [defnFromList [
-        ("+", Func (Just "+") addMany),
-        ("-", Func (Just "-") minusMany),
-        ("*", Func (Just "*") timesMany),
-        ("/", Func (Just "/") divideMany),
-        ("throw", Func (Just "throw") $ \case
-            [x] -> throwAtom x
-            _ -> throwAtom $ MalString "Wrong arguments number"),
-        ("symbols", Func (Just "symbols") $ const printSymbol),
-        ("print", Func (Just "print") malPrint)
-    ]],
+    defn = [defaultDefn],
     callStack = [],
     traceback = []
 }
-
-malPrint :: [MalAtom] -> Eval MalAtom
-malPrint xs = liftIO $ mapM_ print xs >> return Nope
-
-printSymbol :: Eval MalAtom
-printSymbol = do
-    env <- getEnv
-    liftIO . print $ mergeDefn env
-    return Nope
 
 catch :: Eval a -> (EvalError -> Eval a) -> Eval a
 catch (Eval ea) handle = Eval $ \env -> do
@@ -66,6 +48,8 @@ bindDefn ((name, expr):rest) = do
 bindArgs :: Mal -> [MalAtom] -> Eval ()
 bindArgs (Var x) value = modifyEnv $ setDefn x (AtomList value)
 bindArgs (MalList []) [] = return ()
+bindArgs (MalList [Var "&", Var name]) xs = modifyEnv (setDefn name (AtomList xs)) -- the rest
+bindArgs (MalList (Var "&":_)) _ = throw InvalidArgNumber
 bindArgs (MalList (Var x:xs)) (a:as) = modifyEnv (setDefn x a) >> bindArgs (MalList xs) as
 bindArgs _ _ = throw InvalidArgNumber
 
@@ -93,8 +77,12 @@ reduce (Let xs expr) = withNewDefn (bindDefn xs >> MalAtom <$> eval expr)
 reduce (Do [x]) = MalAtom <$> eval x
 reduce (Do (x:xs)) = eval x >> reduce (Do xs)
 
-reduce (If (MalAtom (Boolean False)) _ f) = MalAtom <$> eval f
-reduce (If _ t _) = MalAtom <$> eval t
+reduce (If cond t f) = do
+    c <- eval cond
+    case c of
+        Boolean False -> MalAtom <$> eval f
+        Nope -> MalAtom <$> eval f
+        _ -> MalAtom <$> eval t
 
 reduce (Fn params body) = atom . Func Nothing $ \args -> copyEnv $ do
     bindArgs params args
@@ -113,8 +101,14 @@ reduce (MalList (x:xs)) = do
     r <- case f of 
         (Func n a) -> withCallStack (parseName n) $ do
             modifyEnv $ pushTraceback (parseName n)
-            args <- mapM eval xs
-            a args
+            args <- evalArgs xs
+            a args where
+                evalArgs :: [Mal] -> Eval [MalAtom]
+                evalArgs [] = return []
+                evalArgs (Var "&":b:rest) = eval b >>= \case
+                    (AtomList xs) -> (xs++) <$> evalArgs rest
+                    _ -> throw ValueError
+                evalArgs (x:xs) = (:) <$> eval x <*> evalArgs xs
         _ -> throw $ NotAFunction $ show f
     modifyEnv popTraceback
     atom r
