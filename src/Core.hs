@@ -3,6 +3,8 @@ module Core where
 
 import AST
 import Env
+import Eval
+import Reader
 import Control.Monad
 
 -- global defines
@@ -104,6 +106,11 @@ symbols = do
 func :: String -> ([MalAtom] -> Eval MalAtom) -> (String, MalAtom)
 func name body = (name, Func (Just name) body)
 
+evil :: String -> Eval MalAtom
+evil s = case parse (contents tops) s of 
+        r@(Left _, _) -> throw . SyntaxError $ showResult r
+        (Right a, _) -> eval $ Do a
+
 -- global define
 defaultDefn :: Defn
 defaultDefn = defnFromList [
@@ -142,5 +149,22 @@ defaultDefn = defnFromList [
         func "<" $ compareMany lessThan,
         func "<=" $ compareMany lessThanEq,
         func ">" $ compareMany greaterThan,
-        func ">=" $ compareMany greaterThanEq
+        func ">=" $ compareMany greaterThanEq,
+        func "evil" $ \case
+            [MalString s] -> evil s
+            _ -> throw ValueError
     ]
+
+defaultEnv :: IO Env
+defaultEnv = do
+    (_, env) <- runEval preset emptyEnv
+    return env
+
+preset :: Eval ()
+preset = modifyEnv (pushDefn defaultDefn) >> void malImpl
+
+malImpl :: Eval MalAtom
+malImpl = do
+    evil "(def! (not a) (if a false true))"
+    evil "(def! zero 0)"
+    evil "(def! (succ n) (+ n 1))"

@@ -3,6 +3,13 @@ module Env where
 import qualified Data.Map as Map
 import AST
 
+emptyEnv :: Env
+emptyEnv = Env {
+    defn = [],
+    callStack = [],
+    traceback = []
+}
+
 defnFromList :: [(String, MalAtom)] ->  Defn
 defnFromList = Map.fromList
 

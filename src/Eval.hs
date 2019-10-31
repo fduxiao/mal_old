@@ -7,14 +7,6 @@ module Eval (
 
 import AST
 import Env
-import Core
-
-defaultEnv :: Env
-defaultEnv = Env {
-    defn = [defaultDefn],
-    callStack = [],
-    traceback = []
-}
 
 catch :: Eval a -> (EvalError -> Eval a) -> Eval a
 catch (Eval ea) handle = Eval $ \env -> do
@@ -94,7 +86,6 @@ reduce (Fn params body) = atom . Func Nothing $ \args -> copyEnv $ do
             b args
         x -> x
 
-reduce Empty = atom Nope
 reduce (MalList []) = atom $ AtomList []
 reduce (MalList (x:xs)) = do
     f <- eval x

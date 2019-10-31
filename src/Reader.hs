@@ -18,15 +18,6 @@ readForm = do
         EOF -> throw UnexpectedEOF
         _ -> readMalAtom
 
-readFormWithEmpty :: Parser Mal
-readFormWithEmpty = do
-    t <- peek
-    case t of
-        SpecialChar '(' -> readMalList
-        SemiComma _ -> token >> readFormWithEmpty  -- ignored by readForm
-        EOF -> return Empty
-        _ -> readMalAtom
-
 commentLine :: Parser Mal
 commentLine = Comment <$> semicomma
 
@@ -122,3 +113,6 @@ var = Var <$> varName
 
 contents :: Parser a -> Parser a
 contents p = p << (zeroOne commentLine >> eof)
+
+tops  :: Parser [Mal]
+tops = many readForm

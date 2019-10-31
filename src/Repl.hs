@@ -7,6 +7,7 @@ module Repl (
 
 import Reader
 import Eval
+import Core
 import Data.Map as Map
 import Control.Monad.State
 
@@ -38,6 +39,6 @@ printEvalError err = do
 
 
 rep :: String -> Env -> IO ((), Env)
-rep s env = flip runRepl env $ case parse (contents readFormWithEmpty) s of
+rep s env = flip runRepl env $ case parse (contents tops) s of
     r@(Left _, _) -> liftIO . putStrLn $ showResult r
-    (Right a, _) -> evalToRepl $ eval a
+    (Right a, _) -> sequence_ $ evalToRepl <$> fmap eval a

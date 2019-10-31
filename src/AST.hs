@@ -25,7 +25,8 @@ data EvalError =
     | MalError MalAtom 
     | InvalidArgNumber 
     | TypeError 
-    | ValueError deriving(Show)
+    | ValueError 
+    | SyntaxError String deriving(Show)
 newtype Eval a = Eval {runEval :: Env -> IO (Either EvalError a, Env)}
 
 instance Monad Eval where
@@ -131,7 +132,6 @@ data Mal =
     | MalIO (IO MalAtom)
     | MalDef String Mal
     | Let [(String, Mal)] Mal
-    | Empty
     | Do [Mal]
     | If Mal Mal Mal
     | Fn Mal Mal
@@ -141,7 +141,6 @@ instance Show Mal where
     show (Var v) = v
     show (MalList xs) = showMalString xs
     show (Comment c) = "; " ++ c
-    show Empty = "Empty"
     show (MalDef s mal) = "(def! " ++ s ++ show mal ++ " )"
     show (Do []) = "(Do)"
     show (Do (x:xs)) = "(Do " ++ show x ++ concatMap (\t -> ' ':show t) xs ++ ")"
@@ -150,4 +149,3 @@ instance Show Mal where
 
 atom :: (Monad m) => MalAtom -> m Mal
 atom = return . MalAtom
-
