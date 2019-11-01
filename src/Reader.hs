@@ -135,4 +135,13 @@ contents :: Parser a -> Parser a
 contents p = p << (zeroOne commentLine >> eof)
 
 tops  :: Parser [Mal]
-tops = many readForm
+tops = do
+    forms <- many readForm
+    case forms of
+        [] -> do
+            t <- peek
+            case t of
+                EOF -> return []
+                SemiComma _ -> token >> tops
+                _ -> some readForm -- trigger error
+        _ -> return forms
