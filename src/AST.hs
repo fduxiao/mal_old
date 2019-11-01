@@ -162,7 +162,7 @@ list = return . AtomList
 
 data Mal = 
     MalAtom MalAtom
-    | MalCall [Mal] 
+    | MalList [Mal] 
     | Var String 
     | Comment String
     -- | MalIO (IO MalAtom)
@@ -172,11 +172,30 @@ data Mal =
     | Do [Mal]
     | If Mal Mal Mal
     | Fn Mal Mal
+    | Quote Mal
+    | QuasiQuote Mal
 
+instance Show Mal where
+    show (MalAtom a) = show a
+    show (Var v) = v
+    show (MalList xs) = showMalList xs
+    show (Comment c) = "; " ++ c
+    show (MalDef s mal) = "(def! " ++ s ++ show mal ++ ")"
+    show (Unset xs) = "(unset " ++ show xs ++ ")"
+    show (Do []) = "(do)"
+    show (Do (x:xs)) = "(do " ++ show x ++ concatMap (\t -> ' ':show t) xs ++ ")"
+    show (If a b c) = "(if " ++ show a ++ " " ++ show b ++ " " ++ show c ++ ")"
+    show (Fn a b) = "(fn* " ++ show a  ++ " " ++ show b ++ ")"
+    show (Quote a) = show a
+    show (QuasiQuote a) = show a
+
+
+atom :: (Monad m) => MalAtom -> m Mal
+atom = return . MalAtom
 
 mal2Atom :: Mal -> MalAtom
 mal2Atom (MalAtom s) = s
-mal2Atom (MalCall xs) = AtomList $ fmap mal2Atom xs
+mal2Atom (MalList xs) = AtomList $ fmap mal2Atom xs
 mal2Atom (Var a) = Symbol a
 mal2Atom (MalDef name body) = AtomList [Symbol "def!", Symbol name, mal2Atom body]
 mal2Atom (Unset names) = AtomList [Symbol "unset!", AtomList $ fmap mal2Atom names]
@@ -187,6 +206,8 @@ mal2Atom (Let defns body) = AtomList [Symbol "let*", AtomList $ parseParams defn
 mal2Atom (Do procs) = AtomList (Symbol "do":fmap mal2Atom procs)
 mal2Atom (If c t f) = AtomList [Symbol "if", mal2Atom c, mal2Atom t, mal2Atom f]
 mal2Atom (Fn params body) = AtomList [Symbol "fn*", mal2Atom params, mal2Atom body]
+mal2Atom (Quote a) = AtomList [Symbol "quote", mal2Atom a]
+mal2Atom (QuasiQuote a) = AtomList [Symbol "quasiquote", mal2Atom a]
 
 atom2Mal :: MalAtom -> Maybe Mal
 atom2Mal (Symbol x) = return $ Var x
@@ -212,20 +233,9 @@ atom2Mal (AtomList [Symbol "if", c, t, f]) = If <$> atom2Mal c <*> atom2Mal t <*
 atom2Mal (AtomList (Symbol "if":_)) = Nothing
 atom2Mal (AtomList [Symbol "fn*", params, body]) = Fn <$> atom2Mal params <*> atom2Mal body
 atom2Mal (AtomList (Symbol "fn*":_)) = Nothing
-atom2Mal (AtomList xs) = MalCall <$> mapM atom2Mal xs
+atom2Mal (AtomList [Symbol "quote", ast]) = Quote <$> atom2Mal ast
+atom2Mal (AtomList (Symbol "quote":_)) = Nothing
+atom2Mal (AtomList [Symbol "quasiquote", ast]) = QuasiQuote <$> atom2Mal ast
+atom2Mal (AtomList (Symbol "quasiquote":_)) = Nothing
+atom2Mal (AtomList xs) = MalList <$> mapM atom2Mal xs
 atom2Mal a = atom a
-
-instance Show Mal where
-    show (MalAtom a) = show a
-    show (Var v) = v
-    show (MalCall xs) = showMalList xs
-    show (Comment c) = "; " ++ c
-    show (MalDef s mal) = "(def! " ++ s ++ show mal ++ ")"
-    show (Unset xs) = "(unset " ++ show xs ++ ")"
-    show (Do []) = "(do)"
-    show (Do (x:xs)) = "(do " ++ show x ++ concatMap (\t -> ' ':show t) xs ++ ")"
-    show (If a b c) = "(if " ++ show a ++ " " ++ show b ++ " " ++ show c ++ ")"
-    show (Fn a b) = "(fn* " ++ show a  ++ " " ++ show b ++ ")"
-
-atom :: (Monad m) => MalAtom -> m Mal
-atom = return . MalAtom

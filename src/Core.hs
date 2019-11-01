@@ -154,6 +154,17 @@ printLn [x] = print x
 printLn (MalString s:xs) = putStr s >> putChar ' ' >> printLn xs
 printLn (x:xs) = putStr (show x) >> putChar ' ' >> printLn xs
 
+
+concatList :: [MalAtom] -> Eval MalAtom
+concatList [] = atomList []
+concatList [AtomList xs] = atomList xs
+concatList (AtomList x:rest) = do
+    r <- concatList rest
+    case r of
+        AtomList xs -> atomList $ x ++ xs
+        _ -> throw ValueError
+concatList _ = throw ValueError
+
 -- global define
 defaultDefn :: Defn
 defaultDefn = defnFromList [
@@ -249,7 +260,8 @@ defaultDefn = defnFromList [
             [Number 0] -> liftIO exitSuccess
             [Number a] -> liftIO . exitWith $ ExitFailure (fromInteger a)
             [_] -> throw ValueError
-            _ -> throw InvalidArgNumber
+            _ -> throw InvalidArgNumber,
+        func "concat" concatList
     ]
 
 defaultEnv :: IO Env

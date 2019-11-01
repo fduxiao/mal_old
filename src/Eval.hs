@@ -39,10 +39,10 @@ bindDefn ((name, expr):rest) = do
 
 bindArgs :: Mal -> [MalAtom] -> Eval ()
 bindArgs (Var x) value = modifyEnv $ setDefn x (AtomList value)
-bindArgs (MalCall []) [] = return ()
-bindArgs (MalCall [Var "&", Var name]) xs = modifyEnv (setDefn name (AtomList xs)) -- the rest
-bindArgs (MalCall (Var "&":_)) _ = throw InvalidArgNumber
-bindArgs (MalCall (Var x:xs)) (a:as) = modifyEnv (setDefn x a) >> bindArgs (MalCall xs) as
+bindArgs (MalList []) [] = return ()
+bindArgs (MalList [Var "&", Var name]) xs = modifyEnv (setDefn name (AtomList xs)) -- the rest
+bindArgs (MalList (Var "&":_)) _ = throw InvalidArgNumber
+bindArgs (MalList (Var x:xs)) (a:as) = modifyEnv (setDefn x a) >> bindArgs (MalList xs) as
 bindArgs _ _ = throw InvalidArgNumber
 
 parseName :: Maybe String -> String
@@ -93,8 +93,11 @@ reduce (Fn params body) = atom . Func Nothing $ \args -> copyEnv $ do
             b args
         x -> x
 
-reduce (MalCall []) = atom $ AtomList []
-reduce (MalCall (x:xs)) = do
+reduce (Quote ast) = atom $ mal2Atom ast
+reduce (QuasiQuote ast) = MalAtom <$> quasiquote ast
+
+reduce (MalList []) = atom $ AtomList []
+reduce (MalList (x:xs)) = do
     f <- eval x
     r <- case f of 
         (Func n a) -> withCallStack (parseName n) $ do
@@ -110,6 +113,21 @@ reduce (MalCall (x:xs)) = do
         _ -> throw $ NotAFunction $ show f
     modifyEnv popTraceback
     atom r
+
+quasiquote :: Mal -> Eval MalAtom
+quasiquote (MalList [Var "unquote", a]) = eval a
+quasiquote (MalList (Var "unquote":_)) = throw InvalidArgNumber
+quasiquote (MalList (MalList [Var "splice-unquote", expr]:xs)) = do
+    array <- eval expr
+    rest <- quasiquote (MalList xs)
+    eval $ MalList [Var "concat", MalAtom array, MalAtom rest]
+
+quasiquote (MalList (MalList (Var "splice-unquote":_):xs)) = throw InvalidArgNumber
+quasiquote (MalList (x:xs)) = do
+    first <- quasiquote x
+    rest <- quasiquote $ MalList xs
+    eval $ MalList [Var "cons", MalAtom first, MalAtom rest]
+quasiquote a = eval $ Quote a
 
 eval :: Mal -> Eval MalAtom
 eval mal = do

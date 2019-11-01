@@ -19,7 +19,15 @@ readForm = do
         EOF -> throw UnexpectedEOF
         SpecialChar '@' -> token >> do
             a <- readForm
-            return $ MalCall [Var "deref", a]
+            return $ MalList [Var "deref", a]
+        SpecialChar '\'' -> token >> Quote <$> readForm
+        SpecialChar '`' -> token >> QuasiQuote <$> readForm
+        SpecialChar '~' -> token >> do
+            content <- readForm
+            return $ MalList [Var "unquote", content]
+        WaveAt -> token >> do
+            content <- readForm
+            return $ MalList [Var "splice-unquote", content]
         _ -> readMalAtom
 
 commentLine :: Parser Mal
@@ -50,7 +58,7 @@ manyArgs = do
     return $ ns ++ rest
 
 readArgs :: Parser Mal
-readArgs = var <|> paren (MalCall <$> manyArgs)
+readArgs = var <|> paren (MalList <$> manyArgs)
 
 readMalList :: Parser Mal
 readMalList = paren $ do
@@ -61,7 +69,7 @@ readMalList = paren $ do
             args <- readArgs
             case args of
                 Var name -> MalDef name <$> readForm
-                (MalCall (Var name:params)) -> MalDef name . Fn (MalCall params) <$> readForm
+                (MalList (Var name:params)) -> MalDef name . Fn (MalList params) <$> readForm
                 form -> throw $ Error "InvalidParamForm" (show form)
         NonSpecialChars "let*" -> do
             token
@@ -72,7 +80,9 @@ readMalList = paren $ do
         NonSpecialChars "if" -> token >> If <$> readForm <*> readForm <*> (readForm <|> atom Nil)
         NonSpecialChars "fn*" -> token >> Fn <$> readArgs <*> readForm
         NonSpecialChars "unset!" -> token >> Unset <$> some var
-        _ -> MalCall <$> many readForm
+        NonSpecialChars "quote" -> token >> Quote <$> readForm
+        NonSpecialChars "quasiquote" -> token >> QuasiQuote <$> readForm
+        _ -> MalList <$> many readForm
 
 parseNumberFloat :: String -> Parser Mal
 parseNumberFloat s = newContext $ do
