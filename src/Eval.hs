@@ -39,15 +39,20 @@ bindDefn ((name, expr):rest) = do
 
 bindArgs :: Mal -> [MalAtom] -> Eval ()
 bindArgs (Var x) value = modifyEnv $ setDefn x (AtomList value)
-bindArgs (MalList []) [] = return ()
-bindArgs (MalList [Var "&", Var name]) xs = modifyEnv (setDefn name (AtomList xs)) -- the rest
-bindArgs (MalList (Var "&":_)) _ = throw InvalidArgNumber
-bindArgs (MalList (Var x:xs)) (a:as) = modifyEnv (setDefn x a) >> bindArgs (MalList xs) as
+bindArgs (MalCall []) [] = return ()
+bindArgs (MalCall [Var "&", Var name]) xs = modifyEnv (setDefn name (AtomList xs)) -- the rest
+bindArgs (MalCall (Var "&":_)) _ = throw InvalidArgNumber
+bindArgs (MalCall (Var x:xs)) (a:as) = modifyEnv (setDefn x a) >> bindArgs (MalCall xs) as
 bindArgs _ _ = throw InvalidArgNumber
 
 parseName :: Maybe String -> String
 parseName Nothing = "lambda"
 parseName (Just s) = s
+
+unsetVar :: [Mal] -> Eval Mal
+unsetVar [Var name] = modifyEnv (unsetDefn name) >> atom Nil
+unsetVar (Var name:xs) = modifyEnv (unsetDefn name) >> unsetVar xs
+unsetVar _ = throw ValueError
 
 reduce :: Mal -> Eval Mal
 reduce (MalAtom a) = atom a
@@ -65,6 +70,8 @@ reduce (MalDef name expr) = do
     modifyEnv $ setDefn name r
     atom r
 
+reduce (Unset xs) = unsetVar xs
+
 reduce (Let xs expr) = withNewDefn (bindDefn xs >> MalAtom <$> eval expr)
 reduce (Do [x]) = MalAtom <$> eval x
 reduce (Do (x:xs)) = eval x >> reduce (Do xs)
@@ -73,7 +80,7 @@ reduce (If cond t f) = do
     c <- eval cond
     case c of
         Boolean False -> MalAtom <$> eval f
-        Nope -> MalAtom <$> eval f
+        Nil -> MalAtom <$> eval f
         _ -> MalAtom <$> eval t
 
 reduce (Fn params body) = atom . Func Nothing $ \args -> copyEnv $ do
@@ -86,8 +93,8 @@ reduce (Fn params body) = atom . Func Nothing $ \args -> copyEnv $ do
             b args
         x -> x
 
-reduce (MalList []) = atom $ AtomList []
-reduce (MalList (x:xs)) = do
+reduce (MalCall []) = atom $ AtomList []
+reduce (MalCall (x:xs)) = do
     f <- eval x
     r <- case f of 
         (Func n a) -> withCallStack (parseName n) $ do

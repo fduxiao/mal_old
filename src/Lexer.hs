@@ -40,6 +40,7 @@ data Token = EOF
 
 eof :: Parser Token
 eof = do
+    spaces
     content <- get
     case at content of
         Nothing -> return EOF
@@ -116,4 +117,9 @@ nonspecialChars = satToken p where
 
 
 paren :: Parser a -> Parser a
-paren a = takeToken (SpecialChar '(') >> a << takeToken (SpecialChar ')')
+paren a = do
+    t <- token
+    case t of
+        SpecialChar '(' -> a << takeToken (SpecialChar ')')
+        SpecialChar '[' -> a << takeToken (SpecialChar ']')
+        _ -> throwToken t

@@ -99,8 +99,8 @@ except except code = Parser $ \context ->
         (Left e, context') -> runParser (except e) context'
         a -> a
 
-try :: Parser a -> Parser a
-try p = do
+tryParse :: Parser a -> Parser a
+tryParse p = do
     context <- get
     flip except p $ \err -> do
         put context  -- maintain old state

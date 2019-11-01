@@ -14,8 +14,12 @@ readForm = do
     t <- peek
     case t of
         SpecialChar '(' -> readMalList
+        SpecialChar '[' -> readMalList
         SemiComma _ -> token >> readForm  -- ignored by readForm
         EOF -> throw UnexpectedEOF
+        SpecialChar '@' -> token >> do
+            a <- readForm
+            return $ MalCall [Var "deref", a]
         _ -> readMalAtom
 
 commentLine :: Parser Mal
@@ -43,12 +47,10 @@ manyArgs :: Parser [Mal]
 manyArgs = do
     ns <- many normalVar
     rest <- parseArbitraryArg <|> return []
-    case ns ++ rest of
-        [] -> throw $ Error "EmptyArgs" "You should include at least one argument."
-        r -> return r
+    return $ ns ++ rest
 
 readArgs :: Parser Mal
-readArgs = var <|> paren (MalList <$> manyArgs)
+readArgs = var <|> paren (MalCall <$> manyArgs)
 
 readMalList :: Parser Mal
 readMalList = paren $ do
@@ -59,7 +61,7 @@ readMalList = paren $ do
             args <- readArgs
             case args of
                 Var name -> MalDef name <$> readForm
-                (MalList (Var name:params)) -> MalDef name . Fn (MalList params) <$> readForm
+                (MalCall (Var name:params)) -> MalDef name . Fn (MalCall params) <$> readForm
                 form -> throw $ Error "InvalidParamForm" (show form)
         NonSpecialChars "let*" -> do
             token
@@ -67,23 +69,31 @@ readMalList = paren $ do
             defs <- parseLetArgs params
             Let defs <$> readForm
         NonSpecialChars "do" -> token >> Do <$> some readForm
-        NonSpecialChars "if" -> token >> If <$> readForm <*> readForm <*> readForm
+        NonSpecialChars "if" -> token >> If <$> readForm <*> readForm <*> (readForm <|> atom Nil)
         NonSpecialChars "fn*" -> token >> Fn <$> readArgs <*> readForm
-        _ -> MalList <$> many readForm
-
-parseFloat :: Parser Float
-parseFloat = do
-    n1 <- digits
-    dot <- char '.'
-    n2 <- digits
-    case n1 ++ dot:n2 of
-        "." -> throw $ UnexpectedChar '.'
-        a -> return $ read a
+        NonSpecialChars "unset!" -> token >> Unset <$> some var
+        _ -> MalCall <$> many readForm
 
 parseNumberFloat :: String -> Parser Mal
 parseNumberFloat s = newContext $ do
     put $ Context 0 s
-    r <- (MalAtom . Floating <$> parseFloat) <|> (MalAtom . Number . read <$> digits)
+    sign <- zeroOne $ char '-'
+    int <- digits
+    dot <- zeroOne $ char '.'
+    r <- if dot == "" then
+            case sign ++ int of
+                "" -> throw $ Error "NotANumber" ""
+                "-" -> throw $ Error "NotANumber" ""
+                a -> atom . Number .read $ a
+        else do -- must have a dot
+            decimals <- digits
+            case sign ++ int ++ dot ++ decimals of
+                "." -> throw $ Error "NotANumber" ""
+                "-." -> throw $ Error "NotANumber" ""
+                ('-':'.':xs) -> atom . Floating . read $ ('-':'0':'.':xs)
+                a -> atom . Floating . read $ case decimals of
+                    [] -> a ++ "0"
+                    _ -> a
     eof
     return r
 
@@ -94,10 +104,10 @@ readMalAtom = do
         StringLiteral s -> atom $ MalString s
         NonSpecialChars s ->
             case s of
-                "nil" -> atom $ AtomList []
+                "nil" -> atom Nil
                 "true" -> atom $ Boolean True
                 "false" -> atom $ Boolean False
-                (':':a) -> atom $ Symbol a
+                -- (':':a) -> atom $ Symbol a -- this is a wrong implemenetation
                 a -> parseNumberFloat a <|> return (Var a)
         t -> throwToken t
 

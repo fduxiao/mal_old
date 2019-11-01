@@ -16,16 +16,20 @@ type Repl a = StateT Env IO a
 runRepl :: Repl a -> Env -> IO (a, Env)
 runRepl = runStateT
 
+wrapNil :: MalAtom -> Eval (Maybe String)
+wrapNil Nil = return Nothing
+wrapNil a = Just <$> showAtom a
+
 
 evalToRepl :: Eval MalAtom -> Repl ()
-evalToRepl (Eval e) = do
+evalToRepl e = do
     env <- get
-    (r, env') <- lift $ e env
+    (r, env') <- lift $ runEval (e >>= wrapNil) env
     put env'
     case r of
         Left err -> printEvalError err
-        Right Nope -> return ()
-        Right a -> lift $ print a
+        Right Nothing -> return ()
+        Right (Just a) -> lift $ putStrLn a
 
 printEvalError :: EvalError -> Repl ()
 printEvalError err = do

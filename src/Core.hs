@@ -1,11 +1,18 @@
 {-# LANGUAGE LambdaCase #-}
-module Core where
+module Core (
+    module Core
+) where
 
 import AST
 import Env
 import Eval
 import Reader
 import Control.Monad
+import Control.Exception (try, IOException)
+
+import qualified Data.Map as Map
+import System.IO (readFile)
+import System.Exit
 
 -- global defines
 
@@ -100,8 +107,8 @@ compareMany p (a:b:xs) = do
 symbols :: Eval MalAtom
 symbols = do
     env <- getEnv
-    liftIO . print $ mergeDefn env
-    return Nope
+    let keys = Map.keys $ mergeDefn env
+    return . AtomList $ fmap MalString keys
 
 func :: String -> ([MalAtom] -> Eval MalAtom) -> (String, MalAtom)
 func name body = (name, Func (Just name) body)
@@ -110,6 +117,22 @@ evil :: String -> Eval MalAtom
 evil s = case parse (contents tops) s of 
         r@(Left _, _) -> throw . SyntaxError $ showResult r
         (Right a, _) -> eval $ Do a
+
+swapAtom :: [MalAtom] -> Eval MalAtom
+swapAtom (x@(AtomPtr _):xs) = do
+    value <- derefAtom x
+    v <- compose xs [value]
+    setAtomPtr x v
+    where
+        compose :: [MalAtom] -> [MalAtom] -> Eval MalAtom
+        compose [Func _ func] = func
+        compose (Func _ func:xs) = \rest -> do
+            first <- func rest
+            compose xs [first]
+        compose _ = const $ throw ValueError
+
+swapAtom [_] = throw InvalidArgNumber
+swapAtom _ = throw ValueError
 
 -- global define
 defaultDefn :: Defn
@@ -122,7 +145,9 @@ defaultDefn = defnFromList [
             [x] -> throwAtom x
             _ -> throwAtom $ MalString "Wrong arguments number",
         func "symbols" $ const symbols,
-        func "prn" $ \xs -> liftIO $ mapM_ print xs >> return Nope,
+        func "prn" $ \case
+            [MalString str] -> liftIO $ putStrLn str >> return Nil
+            xs -> liftIO $ mapM_ print xs >> return Nil,
         func "list" list,
         func "cons" $ \case
             [a, AtomList xs] -> list $ a:xs
@@ -145,6 +170,10 @@ defaultDefn = defnFromList [
             [AtomList []] -> bool True
             [_] -> bool False 
             _ -> throw InvalidArgNumber,
+        func "nil?" $ \case
+            [Nil] -> bool True
+            [_] -> bool False
+            _ -> throw InvalidArgNumber,
         func "=" $ compareMany eq,
         func "<" $ compareMany lessThan,
         func "<=" $ compareMany lessThanEq,
@@ -152,7 +181,53 @@ defaultDefn = defnFromList [
         func ">=" $ compareMany greaterThanEq,
         func "evil" $ \case
             [MalString s] -> evil s
-            _ -> throw ValueError
+            _ -> throw ValueError,
+        func "atom" $ \case
+            [x] -> atomPtr x
+            _ -> throw InvalidArgNumber,
+        func "atom?" $ \case
+            [AtomPtr _] -> bool True
+            [_] -> bool False
+            _ -> throw InvalidArgNumber,
+        func "deref" $ \case
+            [AtomPtr a] -> derefAtom (AtomPtr a)
+            [_] -> throw ValueError
+            _ -> throw InvalidArgNumber,
+        func "reset!" $ \case
+            [a, b] -> setAtomPtr a b
+            _ -> throw InvalidArgNumber,
+        func "swap!" swapAtom,
+        func "nope" . const $ return Nil,
+        func "read-string-many" $ \case
+            [MalString input] -> case parse (contents tops) input of
+                r@(Left _, _) -> throw . EvalError $ showResult r
+                (Right a, _) -> case mal2Atom <$> a of
+                    [] -> throw $ EvalError "no input"
+                    xs -> atomList xs
+            [_] -> throw ValueError
+            _ -> throw InvalidArgNumber,
+        func "slurp" $ \case
+            [MalString filename] -> do
+                result <- liftIO . try $ readFile filename
+                case result of
+                    Left err -> throw $ EvalError (show (err :: IOException))
+                    Right content -> return $ MalString content
+            [_] -> throw ValueError
+            _ -> throw InvalidArgNumber,
+        func "eval" $ \case
+            [d] -> case atom2Mal d of
+                Just a -> eval a
+                Nothing -> throw $ EvalError "parse error"
+            _ -> throw InvalidArgNumber,
+        func "type" $ \case
+            [x] -> malString $ atomType x
+            _ -> throw ValueError,
+        func "exit" $ \case
+            [] -> liftIO exitSuccess
+            [Number 0] -> liftIO exitSuccess
+            [Number a] -> liftIO . exitWith $ ExitFailure (fromInteger a)
+            [_] -> throw ValueError
+            _ -> throw InvalidArgNumber
     ]
 
 defaultEnv :: IO Env
@@ -168,3 +243,6 @@ malImpl = do
     evil "(def! (not a) (if a false true))"
     evil "(def! zero 0)"
     evil "(def! (succ n) (+ n 1))"
+    evil "(def! (read-string x) (car [read-string-many x]))"
+    evil "(def! (eval-many x) (car [read-string-many x]))"
+    evil "(def! (load-file s) (let* [content (slurp s)] (evil content)))"

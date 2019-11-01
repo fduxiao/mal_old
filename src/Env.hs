@@ -1,6 +1,6 @@
 module Env where
 
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import AST
 
 emptyEnv :: Env
@@ -39,6 +39,12 @@ setDefn key value env@Env{defn=defn} = env {defn = set defn key value}
         set :: [Defn] -> String -> MalAtom -> [Defn]
         set[] key value = [Map.insert key value Map.empty]
         set (x:xs) key value = Map.insert key value x:xs
+
+unsetDefn :: String -> Env -> Env
+unsetDefn _ env@Env{defn=[]} = env
+unsetDefn key env@Env{defn=x:xs} = case Map.lookup key x of
+    Nothing -> unsetDefn key env {defn = xs}
+    Just _ -> let x' = Map.delete key x in env {defn=x':xs}
 
 mergeDefn :: Env -> Defn
 mergeDefn Env{defn=defn} = foldl Map.union Map.empty defn
