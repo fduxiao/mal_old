@@ -134,6 +134,26 @@ swapAtom (x@(AtomPtr _):xs) = do
 swapAtom [_] = throw InvalidArgNumber
 swapAtom _ = throw ValueError
 
+
+prStr :: [MalAtom] -> String
+prStr [] = ""
+prStr [x] = show x
+prStr (x:xs) = show x ++ ' ':prStr xs
+
+str :: [MalAtom] -> String
+str [] = ""
+str [MalString s] = s
+str [x] = show x
+str (MalString s:xs) = s ++ str xs
+str (x:xs) = show x ++ str xs
+
+printLn :: [MalAtom] -> IO ()
+printLn [] = putStrLn ""
+printLn [MalString s] = putStrLn s
+printLn [x] = print x
+printLn (MalString s:xs) = putStr s >> putChar ' ' >> printLn xs
+printLn (x:xs) = putStr (show x) >> putChar ' ' >> printLn xs
+
 -- global define
 defaultDefn :: Defn
 defaultDefn = defnFromList [
@@ -145,9 +165,11 @@ defaultDefn = defnFromList [
             [x] -> throwAtom x
             _ -> throwAtom $ MalString "Wrong arguments number",
         func "symbols" $ const symbols,
-        func "prn" $ \case
-            [MalString str] -> liftIO $ putStrLn str >> return Nil
-            xs -> liftIO $ mapM_ print xs >> return Nil,
+        func "pr-str" $ \xs -> malString $ prStr xs,
+        func "str" $ \xs -> malString $ str xs,
+        func "prn" $ \xs -> liftIO (putStrLn $ prStr xs) >> return Nil,
+        func "println" $ \xs -> liftIO (printLn xs) >> return Nil,
+        func "put-str" $ \xs -> liftIO (putStr $ str xs) >> return Nil,
         func "list" list,
         func "cons" $ \case
             [a, AtomList xs] -> list $ a:xs
