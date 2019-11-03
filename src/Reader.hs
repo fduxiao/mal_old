@@ -171,6 +171,18 @@ var = Var <$> varName
 contents :: Parser a -> Parser a
 contents p = p << (zeroOne commentLine >> eof)
 
+plaintops  :: Parser [Mal]
+plaintops = do
+    forms <- many readPlainForm
+    case forms of
+        [] -> do
+            t <- peek
+            case t of
+                EOF -> return []
+                SemiComma _ -> token >> plaintops
+                _ -> some readPlainForm -- trigger error
+        _ -> return forms
+
 tops  :: Parser [Mal]
 tops = do
     forms <- many readForm

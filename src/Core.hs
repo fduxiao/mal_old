@@ -231,8 +231,16 @@ defaultDefn = defnFromList [
             _ -> throw InvalidArgNumber,
         func "swap!" swapAtom,
         func "nope" . const $ return Nil,
-        func "read-string-many" $ \case
+        func "mal-string-many" $ \case
             [MalString input] -> case parse (contents tops) input of
+                r@(Left _, _) -> throw . EvalError $ showResult r
+                (Right a, _) -> case mal2Atom <$> a of
+                    [] -> throw $ EvalError "no input"
+                    xs -> atomList xs
+            [_] -> throw ValueError
+            _ -> throw InvalidArgNumber,
+        func "read-string-many" $ \case
+            [MalString input] -> case parse (contents plaintops) input of
                 r@(Left _, _) -> throw . EvalError $ showResult r
                 (Right a, _) -> case mal2Atom <$> a of
                     [] -> throw $ EvalError "no input"
@@ -290,6 +298,7 @@ malImpl = do
     evil "(def! zero 0)"
     evil "(def! (succ n) (+ n 1))"
     evil "(def! (read-string x) (car [read-string-many x]))"
+    evil "(def! (mal-string x) (car [mal-string-many x]))"
     evil "(def! (eval-many x) (car [read-string-many x]))"
     evil "(def! (load-file s) (let* [content (slurp s)] (evil content)))"
     evil "(def! first car) (def! rest cdr)"
