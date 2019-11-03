@@ -280,3 +280,6 @@ malImpl = do
     evil "(def! (read-string x) (car [read-string-many x]))"
     evil "(def! (eval-many x) (car [read-string-many x]))"
     evil "(def! (load-file s) (let* [content (slurp s)] (evil content)))"
+    evil "(def! first car) (def! rest cdr)"
+    evil "(def! (nth xs n) [if (= n 0) (car xs) (nth (cdr xs) (- n 1))])"
+    evil "(defmacro! cond(fn* (& xs) (if (> (count xs) 0) (list 'if (first xs) (if (> (count xs) 1) (nth xs 1) (throw \"odd number of forms to cond\")) (cons 'cond (rest (rest xs)))))))"

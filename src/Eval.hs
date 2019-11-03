@@ -93,6 +93,19 @@ reduce (Fn params body) = atom . Func Nothing $ \args -> copyEnv $ do
             b args
         x -> x
 
+reduce (MacroDef name v) = do
+    body <- eval v
+    case body of
+        (Func _ proc) -> modifyEnv (setDefn name macro) >> atom macro where
+            macro = Macro name $ \args -> do
+                result <- proc args
+                case result of
+                    AtomList ast -> case atom2Mal (AtomList ast) of
+                        Nothing -> throwAtom body
+                        (Just a) -> return a
+                    a -> atom a
+        _ -> throwAtom body
+
 reduce (Quote ast) = atom $ mal2Atom ast
 reduce (QuasiQuote ast) = MalAtom <$> quasiquote ast
 
@@ -110,6 +123,11 @@ reduce (MalList (x:xs)) = do
                     (AtomList xs) -> (xs++) <$> evalArgs rest
                     _ -> throw ValueError
                 evalArgs (x:xs) = (:) <$> eval x <*> evalArgs xs
+        (Macro n macro) -> withCallStack n $ do
+            modifyEnv $ pushTraceback n
+            let args = fmap mal2Atom xs
+            result <- macro args
+            eval result
         _ -> throw $ NotAFunction $ show f
     modifyEnv popTraceback
     atom r

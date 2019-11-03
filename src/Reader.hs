@@ -82,6 +82,13 @@ readMalList = paren $ do
         NonSpecialChars "unset!" -> token >> Unset <$> some var
         NonSpecialChars "quote" -> token >> Quote <$> readForm
         NonSpecialChars "quasiquote" -> token >> QuasiQuote <$> readForm
+        NonSpecialChars "defmacro!" -> do
+            token
+            args <- readArgs
+            case args of
+                Var name -> MacroDef name <$> readForm
+                (MalList (Var name:params)) -> MacroDef name . Fn (MalList params) <$> readForm
+                form -> throw $ Error "InvalidParamForm" (show form)
         _ -> MalList <$> many readForm
 
 parseNumberFloat :: String -> Parser Mal
