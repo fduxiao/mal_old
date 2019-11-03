@@ -10,27 +10,16 @@ import Control.Monad
 import qualified Data.IORef as Ref
 import Control.Applicative
 
-type Traceback = String
 type CallStack = String
 
 type Defn = Map.Map String MalAtom
 data Env = Env {
     callStack :: [CallStack],
-    traceback :: [Traceback],
     defn :: [Defn]
 }
 
-data EvalError = 
-    UndefinedSymbol String 
-    | EvalError String
-    | NotAFunction String 
-    | MalError MalAtom 
-    | InvalidArgNumber 
-    | TypeError 
-    | ValueError 
-    | SyntaxError String deriving(Show)
 
-newtype Eval a = Eval {runEval :: Env -> IO (Either EvalError a, Env)}
+newtype Eval a = Eval {runEval :: Env -> IO (Either MalAtom a, Env)}
 
 instance Monad Eval where
     return a = Eval $ \env -> return (Right a, env)
@@ -61,11 +50,12 @@ putEnv env = Eval $ \_ -> return (Right (), env)
 modifyEnv :: (Env -> Env) -> Eval ()
 modifyEnv f = getEnv >>= (putEnv . f)
 
-throw :: EvalError -> Eval a
-throw e = Eval $ \env -> return (Left e, env)
+throw :: MalAtom -> Eval a
+throw err@(AtomError _ _) = Eval $ \env -> return (Left err, env)
+throw err = Eval $ \env -> return (Left (AtomError err []), env)
 
-throwAtom :: MalAtom -> Eval a
-throwAtom = throw . MalError
+throwStringErr :: String -> Eval a
+throwStringErr content = throw (MalString content)
 
 joinString :: (Show a) => String -> [a] -> String
 joinString _ [] = ""
@@ -86,7 +76,7 @@ data MalAtom =
     | Func (Maybe String) ([MalAtom] -> Eval MalAtom)  -- name and its definition
     | Macro String ([MalAtom] -> Eval Mal)
     | Nil
-    | AtomError MalAtom [Traceback]
+    | AtomError MalAtom [CallStack]
     | AtomPtr (Ref.IORef MalAtom)
 
 derefAtom :: MalAtom -> Eval MalAtom
@@ -99,7 +89,7 @@ atomPtr x = do
 
 setAtomPtr :: MalAtom -> MalAtom -> Eval MalAtom
 setAtomPtr (AtomPtr ref) value = liftIO $ Ref.writeIORef ref value >> return value
-setAtomPtr _ _ = throw ValueError
+setAtomPtr _ _ = throwStringErr "ValueError"
 
 showAtom :: MalAtom -> Eval String
 showAtom a@(AtomPtr x) = do

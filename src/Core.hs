@@ -22,57 +22,57 @@ addAtom (Number n1) (Number n2) = number (n1 + n2)
 addAtom (Number n1) (Floating n2) = floating (fromInteger n1 + n2)
 addAtom (Floating n1) (Number n2) = floating (n1 + fromInteger n2)
 addAtom (Floating n1) (Floating n2) = floating (n1 + n2)
-addAtom a b = throwAtom . MalString $ "You can not add " ++ show a ++ " and " ++ show b
+addAtom a b = throwStringErr $ "You can not add " ++ show a ++ " and " ++ show b
 
 minusAtom :: MalAtom -> MalAtom -> Eval MalAtom
 minusAtom (Number n1) (Number n2) = number (n1 - n2)
 minusAtom (Number n1) (Floating n2) = floating (fromInteger n1 - n2)
 minusAtom (Floating n1) (Number n2) = floating (n1 - fromInteger n2)
 minusAtom (Floating n1) (Floating n2) = floating (n1 - n2)
-minusAtom a b = throwAtom . MalString $ "You can not minus " ++ show a ++ " and " ++ show b
+minusAtom a b = throwStringErr $ "You can not minus " ++ show a ++ " and " ++ show b
 
 timesAtom :: MalAtom -> MalAtom -> Eval MalAtom
 timesAtom (Number n1) (Number n2) = number (n1 * n2)
 timesAtom (Number n1) (Floating n2) = floating (fromInteger n1 * n2)
 timesAtom (Floating n1) (Number n2) = floating (n1 * fromInteger n2)
 timesAtom (Floating n1) (Floating n2) = floating (n1 * n2)
-timesAtom a b = throwAtom . MalString $ "You can not times " ++ show a ++ " and " ++ show b
+timesAtom a b = throwStringErr $ "You can not times " ++ show a ++ " and " ++ show b
 
 divideAtom :: MalAtom -> MalAtom -> Eval MalAtom
-divideAtom _ (Number 0) = throwAtom $ Number 0
-divideAtom _ (Floating 0) = throwAtom $ Floating 0
+divideAtom _ (Number 0) = throw $ Number 0
+divideAtom _ (Floating 0) = throw $ Floating 0
 divideAtom (Number n1) (Number n2)
     | n1 `mod` n2 == 0 = number (n1 `div` n2)
     | otherwise        = floating (fromInteger n1 / fromInteger n2)
 divideAtom (Floating n1) (Number n2) = floating (n1 / fromInteger n2)
 divideAtom (Number n1) (Floating n2) = floating (fromInteger n1 /  n2)
 divideAtom (Floating n1) (Floating n2) = floating (n1 / n2)
-divideAtom a b = throwAtom . MalString $ "You can not divide " ++ show a ++ " by " ++ show b
+divideAtom a b = throwStringErr $ "You can not divide " ++ show a ++ " by " ++ show b
 
 bind2 :: (Monad m) => (a -> b -> m c) -> m a -> m b -> m c
 bind2 f a b = join (f <$> a <*> b)
 
 addMany :: [MalAtom] -> Eval MalAtom
-addMany [] = throwAtom $ MalString "Inadequate Operands"
+addMany [] = throwStringErr "Inadequate Operands"
 addMany xs = foldl (bind2 addAtom) (number 0) $ fmap return xs
 
 minusMany :: [MalAtom] -> Eval MalAtom
-minusMany [] = throwAtom $ MalString "Inadequate Operands"
+minusMany [] = throwStringErr "Inadequate Operands"
 minusMany [x] = minusAtom (Number 0) x
 minusMany (x:xs) = addMany xs >>= minusAtom x
 
 timesMany :: [MalAtom] -> Eval MalAtom
-timesMany [] = throwAtom $ MalString "Inadequate Operands"
+timesMany [] = throwStringErr "Inadequate Operands"
 timesMany xs = foldl (bind2 timesAtom) (number 1) $ fmap return xs
 
 divideMany :: [MalAtom] -> Eval MalAtom
-divideMany [] = throwAtom $ MalString "Inadequate Operands"
+divideMany [] = throwStringErr "Inadequate Operands"
 divideMany [x] = divideAtom (Number 1) x
 divideMany (x:xs) = timesMany xs >>= divideAtom x
 
 eq :: MalAtom -> MalAtom -> Eval Bool
-eq (Func _ _) _ = throw ValueError
-eq _ (Func _ _) = throw ValueError
+eq (Func _ _) _ = throwStringErr "ValueError"
+eq _ (Func _ _) = throwStringErr "ValueError"
 eq a b = return $ a == b
 
 lessThan :: MalAtom -> MalAtom -> Eval Bool
@@ -86,7 +86,7 @@ lessThan (AtomList []) (AtomList _) = return True
 lessThan (AtomList (a:as)) (AtomList (b:bs)) = do
     first <- eq a b
     if first then lessThan (AtomList as) (AtomList bs) else a `lessThan` b
-lessThan _ _ = throw ValueError
+lessThan _ _ = throwStringErr "ValueError"
 
 lessThanEq :: MalAtom -> MalAtom -> Eval Bool
 lessThanEq a b = (||) <$> eq a b <*> lessThan a b
@@ -98,7 +98,7 @@ greaterThanEq :: MalAtom -> MalAtom -> Eval Bool
 greaterThanEq a b = not <$> lessThan a b
 
 compareMany :: (MalAtom -> MalAtom -> Eval Bool) -> [MalAtom] -> Eval MalAtom
-compareMany _ [] = throw InvalidArgNumber
+compareMany _ [] = throwStringErr "InvalidArgNumber"
 compareMany _ [x] = bool True
 compareMany p (a:b:xs) = do
     r <- p a b
@@ -115,7 +115,7 @@ func name body = (name, Func (Just name) body)
 
 evil :: String -> Eval MalAtom
 evil s = case parse (contents tops) s of 
-        r@(Left _, _) -> throw . SyntaxError $ showResult r
+        r@(Left _, _) -> throwStringErr $ "SyntaxError" ++ showResult r
         (Right a, _) -> eval $ Do a
 
 swapAtom :: [MalAtom] -> Eval MalAtom
@@ -129,10 +129,10 @@ swapAtom (x@(AtomPtr _):xs) = do
         compose (Func _ func:xs) = \rest -> do
             first <- func rest
             compose xs [first]
-        compose _ = const $ throw ValueError
+        compose _ = const $ throwStringErr "ValueError"
 
-swapAtom [_] = throw InvalidArgNumber
-swapAtom _ = throw ValueError
+swapAtom [_] = throwStringErr "InvalidArgNumber"
+swapAtom _ = throwStringErr "ValueError"
 
 
 prStr :: [MalAtom] -> String
@@ -162,8 +162,8 @@ concatList (AtomList x:rest) = do
     r <- concatList rest
     case r of
         AtomList xs -> atomList $ x ++ xs
-        _ -> throw ValueError
-concatList _ = throw ValueError
+        _ -> throwStringErr "ValueError"
+concatList _ = throwStringErr "ValueError"
 
 -- global define
 defaultDefn :: Defn
@@ -173,8 +173,8 @@ defaultDefn = defnFromList [
         func "*" timesMany,
         func "/" divideMany,
         func "throw" $ \case
-            [x] -> throwAtom x
-            _ -> throwAtom $ MalString "Wrong arguments number",
+            [x] -> throw x
+            _ -> throwStringErr "Wrong arguments number",
         func "symbols" $ const symbols,
         func "pr-str" $ \xs -> malString $ prStr xs,
         func "str" $ \xs -> malString $ str xs,
@@ -184,29 +184,29 @@ defaultDefn = defnFromList [
         func "list" list,
         func "cons" $ \case
             [a, AtomList xs] -> list $ a:xs
-            [a, _] -> throw TypeError
-            _ -> throw InvalidArgNumber,
+            [a, _] -> throwStringErr "TypeError"
+            _ -> throwStringErr "InvalidArgNumber",
         func "car" $ \case
             [AtomList (x:_)] -> return x
-            _ -> throw TypeError,
+            _ -> throwStringErr "TypeError",
         func "cdr" $ \case
             [AtomList (_:xs)] -> list xs
-            _ -> throw TypeError,
+            _ -> throwStringErr "TypeError",
         func "list?" $ \case
             [AtomList _] -> bool True
             [_] -> bool False 
-            _ -> throw InvalidArgNumber,
+            _ -> throwStringErr "InvalidArgNumber",
         func "count" $ \case
             [AtomList xs] -> number . sum . fmap (const 1) $ xs
-            _ -> throw TypeError,
+            _ -> throwStringErr "TypeError",
         func "empty?" $ \case
             [AtomList []] -> bool True
             [_] -> bool False 
-            _ -> throw InvalidArgNumber,
+            _ -> throwStringErr "InvalidArgNumber",
         func "nil?" $ \case
             [Nil] -> bool True
             [_] -> bool False
-            _ -> throw InvalidArgNumber,
+            _ -> throwStringErr "InvalidArgNumber",
         func "=" $ compareMany eq,
         func "<" $ compareMany lessThan,
         func "<=" $ compareMany lessThanEq,
@@ -214,74 +214,74 @@ defaultDefn = defnFromList [
         func ">=" $ compareMany greaterThanEq,
         func "evil" $ \case
             [MalString s] -> evil s
-            _ -> throw ValueError,
+            _ -> throwStringErr "ValueError",
         func "atom" $ \case
             [x] -> atomPtr x
-            _ -> throw InvalidArgNumber,
+            _ -> throwStringErr "InvalidArgNumber",
         func "atom?" $ \case
             [AtomPtr _] -> bool True
             [_] -> bool False
-            _ -> throw InvalidArgNumber,
+            _ -> throwStringErr "InvalidArgNumber",
         func "deref" $ \case
             [AtomPtr a] -> derefAtom (AtomPtr a)
-            [_] -> throw ValueError
-            _ -> throw InvalidArgNumber,
+            [_] -> throwStringErr "ValueError"
+            _ -> throwStringErr "InvalidArgNumber",
         func "reset!" $ \case
             [a, b] -> setAtomPtr a b
-            _ -> throw InvalidArgNumber,
+            _ -> throwStringErr "InvalidArgNumber",
         func "swap!" swapAtom,
         func "nope" . const $ return Nil,
         func "mal-string-many" $ \case
             [MalString input] -> case parse (contents tops) input of
-                r@(Left _, _) -> throw . EvalError $ showResult r
+                r@(Left _, _) -> throwStringErr $ showResult r
                 (Right a, _) -> case mal2Atom <$> a of
-                    [] -> throw $ EvalError "no input"
+                    [] -> throwStringErr "no input"
                     xs -> atomList xs
-            [_] -> throw ValueError
-            _ -> throw InvalidArgNumber,
+            [_] -> throwStringErr "ValueError"
+            _ -> throwStringErr "InvalidArgNumber",
         func "read-string-many" $ \case
             [MalString input] -> case parse (contents plaintops) input of
-                r@(Left _, _) -> throw . EvalError $ showResult r
+                r@(Left _, _) -> throwStringErr $ showResult r
                 (Right a, _) -> case mal2Atom <$> a of
-                    [] -> throw $ EvalError "no input"
+                    [] -> throwStringErr "no input"
                     xs -> atomList xs
-            [_] -> throw ValueError
-            _ -> throw InvalidArgNumber,
+            [_] -> throwStringErr "ValueError"
+            _ -> throwStringErr "InvalidArgNumber",
         func "slurp" $ \case
             [MalString filename] -> do
                 result <- liftIO . try $ readFile filename
                 case result of
-                    Left err -> throw $ EvalError (show (err :: IOException))
+                    Left err -> throwStringErr $ show (err :: IOException)
                     Right content -> return $ MalString content
-            [_] -> throw ValueError
-            _ -> throw InvalidArgNumber,
+            [_] -> throwStringErr "ValueError"
+            _ -> throwStringErr "InvalidArgNumber",
         func "eval" $ \case
             [d] -> case atom2Mal d of
                 Just a -> eval a
-                Nothing -> throw $ EvalError "parse error"
-            _ -> throw InvalidArgNumber,
+                Nothing -> throwStringErr "parse error"
+            _ -> throwStringErr "InvalidArgNumber",
         func "type" $ \case
             [x] -> malString $ atomType x
-            _ -> throw ValueError,
+            _ -> throwStringErr "ValueError",
         func "exit" $ \case
             [] -> liftIO exitSuccess
             [Number 0] -> liftIO exitSuccess
             [Number a] -> liftIO . exitWith $ ExitFailure (fromInteger a)
-            [_] -> throw ValueError
-            _ -> throw InvalidArgNumber,
+            [_] -> throwStringErr "ValueError"
+            _ -> throwStringErr "InvalidArgNumber",
         func "concat" concatList,
         func "err?" $ \case
             [AtomError _ _] -> bool True
             [_] -> bool False
-            _ -> throw InvalidArgNumber,
+            _ -> throwStringErr "InvalidArgNumber",
         func "err-value" $ \case
             [AtomError v _] -> return v
-            [_] -> throw ValueError
-            _ -> throw InvalidArgNumber,
+            [_] -> throwStringErr "ValueError"
+            _ -> throwStringErr "InvalidArgNumber",
         func "traceback" $ \case
             [AtomError _ t] -> return . AtomList $ fmap MalString t
-            [_] -> throw ValueError
-            _ -> throw InvalidArgNumber
+            [_] -> throwStringErr "ValueError"
+            _ -> throwStringErr "InvalidArgNumber"
     ]
 
 defaultEnv :: IO Env

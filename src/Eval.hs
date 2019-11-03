@@ -8,7 +8,7 @@ module Eval (
 import AST
 import Env
 
-catch :: Eval a -> (EvalError -> Eval a) -> Eval a
+catch :: Eval a -> (MalAtom -> Eval a) -> Eval a
 catch (Eval ea) handle = Eval $ \env -> do
     (a, env') <- ea env
     case a of
@@ -36,9 +36,9 @@ bindArgs :: Mal -> [MalAtom] -> Eval ()
 bindArgs (Var x) value = modifyEnv $ setDefn x (AtomList value)
 bindArgs (MalList []) [] = return ()
 bindArgs (MalList [Var "&", Var name]) xs = modifyEnv (setDefn name (AtomList xs)) -- the rest
-bindArgs (MalList (Var "&":_)) _ = throw InvalidArgNumber
+bindArgs (MalList (Var "&":_)) _ = throwStringErr "InvalidArgNumber"
 bindArgs (MalList (Var x:xs)) (a:as) = modifyEnv (setDefn x a) >> bindArgs (MalList xs) as
-bindArgs _ _ = throw InvalidArgNumber
+bindArgs _ _ = throwStringErr "InvalidArgNumber"
 
 parseName :: Maybe String -> String
 parseName Nothing = "lambda"
@@ -47,7 +47,7 @@ parseName (Just s) = s
 unsetVar :: [Mal] -> Eval MalAtom
 unsetVar [Var name] = modifyEnv (unsetDefn name) >> return Nil
 unsetVar (Var name:xs) = modifyEnv (unsetDefn name) >> unsetVar xs
-unsetVar _ = throw ValueError
+unsetVar _ = throwStringErr "ValueError"
 
 reduce :: [Mal] -> Eval Mal
 
@@ -56,33 +56,36 @@ reduce (x:xs) = do
     f <- eval x
     r <- case f of 
         (Func n a) -> withCallStack (parseName n) $ do
-            modifyEnv $ pushTraceback (parseName n)
             args <- evalArgs xs
-            a args where
+            catch (a args) except where
                 evalArgs :: [Mal] -> Eval [MalAtom]
                 evalArgs [] = return []
                 evalArgs (Var "&":b:rest) = eval b >>= \case
                     (AtomList xs) -> (xs++) <$> evalArgs rest
-                    _ -> throw ValueError
+                    _ -> throwStringErr "ValueError"
                 evalArgs (x:xs) = (:) <$> eval x <*> evalArgs xs
+                except :: MalAtom -> Eval MalAtom
+                except (AtomError value traceback) = throw $ AtomError value (traceback ++ [parseName n])
+                except value = throw $ AtomError value [parseName n]
         (Macro n macro) -> withCallStack n $ do
-            modifyEnv $ pushTraceback n
             let args = fmap mal2Atom xs
             result <- macro args
-            eval result
-        _ -> throw $ NotAFunction $ show f
-    modifyEnv popTraceback
+            catch (eval result) except where
+                except :: MalAtom -> Eval MalAtom
+                except (AtomError value traceback) = throw $ AtomError value (traceback ++ [n])
+                except value = throw $ AtomError value [n]
+        _ -> throwStringErr $ "NotAFunction" ++ show f
     atom r
 
 quasiquote :: Mal -> Eval MalAtom
 quasiquote (MalList [Var "unquote", a]) = eval a
-quasiquote (MalList (Var "unquote":_)) = throw InvalidArgNumber
+quasiquote (MalList (Var "unquote":_)) = throwStringErr "InvalidArgNumber"
 quasiquote (MalList (MalList [Var "splice-unquote", expr]:xs)) = do
     array <- eval expr
     rest <- quasiquote (MalList xs)
     eval $ MalList [Var "concat", MalAtom array, MalAtom rest]
 
-quasiquote (MalList (MalList (Var "splice-unquote":_):xs)) = throw InvalidArgNumber
+quasiquote (MalList (MalList (Var "splice-unquote":_):xs)) = throwStringErr "InvalidArgNumber"
 quasiquote (MalList (x:xs)) = do
     first <- quasiquote x
     rest <- quasiquote $ MalList xs
@@ -94,7 +97,7 @@ eval (MalAtom a) = return a
 eval (Var a) = do
     env <- getEnv
     case find env a of
-        Nothing -> throw $ UndefinedSymbol a
+        Nothing -> throwStringErr $ "UndefinedSymbol" ++ a
         Just a -> return a
 
 eval (MalDef name expr) = do
@@ -136,21 +139,16 @@ eval (MacroDef name v) = do
                 result <- proc args
                 case result of
                     AtomList ast -> case atom2Mal (AtomList ast) of
-                        Nothing -> throwAtom body
+                        Nothing -> throw body
                         (Just a) -> return a
                     a -> atom a
-        _ -> throwAtom body
+        _ -> throw body
 
 eval (Quote ast) = return $ mal2Atom ast
 eval (QuasiQuote ast) = quasiquote ast
 
 eval (Try body var caught) = catch (eval body) $ \err -> withNewDefn $ do
-    env <- getEnv
-    modifyEnv . setDefn var $ case err of
-        MalError (AtomError value tb) -> AtomError value (tb ++ traceback env)
-        MalError e -> AtomError e (traceback env)
-        e -> AtomError (MalString $ show e) (traceback env)
-    modifyEnv clearTraceback
+    modifyEnv $ setDefn var err
     eval caught
 
 eval (MalList xs) = do

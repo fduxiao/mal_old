@@ -6,8 +6,7 @@ import AST
 emptyEnv :: Env
 emptyEnv = Env {
     defn = [],
-    callStack = [],
-    traceback = []
+    callStack = []
 }
 
 defnFromList :: [(String, MalAtom)] ->  Defn
@@ -56,14 +55,3 @@ pushCallStack s env@Env{callStack=stack} = env {callStack = s:stack}
 popCallStack :: Env -> Env
 popCallStack env@Env{callStack=[]} = env
 popCallStack env@Env{callStack=x:xs} = env{callStack = xs}
-
-
-pushTraceback :: Traceback -> Env -> Env
-pushTraceback s env@Env{traceback=stack} = env {traceback = s:stack}
-
-popTraceback :: Env -> Env
-popTraceback env@Env{traceback=[]} = env
-popTraceback env@Env{traceback=x:xs} = env{traceback = xs}
-
-clearTraceback :: Env -> Env
-clearTraceback env = env{traceback=[]}
