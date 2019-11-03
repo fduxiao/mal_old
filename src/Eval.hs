@@ -25,11 +25,6 @@ withNewDefn (Eval p) = Eval $ \env -> do
     (a, env') <- p (pushEmptyDefn env)
     return (a, popDefn env')
 
-copyEnv :: Eval a -> Eval a
-copyEnv (Eval p) = Eval $ \env -> do
-    (r, _) <- p env
-    return (r, env)
-
 bindDefn :: [(String, Mal)] -> Eval ()
 bindDefn [] = return ()
 bindDefn ((name, expr):rest) = do
@@ -49,68 +44,15 @@ parseName :: Maybe String -> String
 parseName Nothing = "lambda"
 parseName (Just s) = s
 
-unsetVar :: [Mal] -> Eval Mal
-unsetVar [Var name] = modifyEnv (unsetDefn name) >> atom Nil
+unsetVar :: [Mal] -> Eval MalAtom
+unsetVar [Var name] = modifyEnv (unsetDefn name) >> return Nil
 unsetVar (Var name:xs) = modifyEnv (unsetDefn name) >> unsetVar xs
 unsetVar _ = throw ValueError
 
-reduce :: Mal -> Eval Mal
-reduce (MalAtom a) = atom a
-reduce (Var a) = do
-    env <- getEnv
-    case find env a of 
-        Nothing -> throw $ UndefinedSymbol a
-        Just a -> atom a
+reduce :: [Mal] -> Eval Mal
 
-reduce (MalDef name expr) = do
-    r <- eval expr
-    r <- return $ case r of 
-        Func Nothing body -> Func (Just name) body 
-        _ -> r
-    modifyEnv $ setDefn name r
-    atom r
-
-reduce (Unset xs) = unsetVar xs
-
-reduce (Let xs expr) = withNewDefn (bindDefn xs >> MalAtom <$> eval expr)
-reduce (Do [x]) = MalAtom <$> eval x
-reduce (Do (x:xs)) = eval x >> reduce (Do xs)
-
-reduce (If cond t f) = do
-    c <- eval cond
-    case c of
-        Boolean False -> MalAtom <$> eval f
-        Nil -> MalAtom <$> eval f
-        _ -> MalAtom <$> eval t
-
-reduce (Fn params body) = atom . Func Nothing $ \args -> copyEnv $ do
-    bindArgs params args
-    env <- getEnv
-    value <- eval body
-    return $ case value of
-        (Func a b) -> Func a $ \args -> do
-            putEnv env
-            b args
-        x -> x
-
-reduce (MacroDef name v) = do
-    body <- eval v
-    case body of
-        (Func _ proc) -> modifyEnv (setDefn name macro) >> atom macro where
-            macro = Macro name $ \args -> do
-                result <- proc args
-                case result of
-                    AtomList ast -> case atom2Mal (AtomList ast) of
-                        Nothing -> throwAtom body
-                        (Just a) -> return a
-                    a -> atom a
-        _ -> throwAtom body
-
-reduce (Quote ast) = atom $ mal2Atom ast
-reduce (QuasiQuote ast) = MalAtom <$> quasiquote ast
-
-reduce (MalList []) = atom $ AtomList []
-reduce (MalList (x:xs)) = do
+reduce [] = atom $ AtomList []
+reduce (x:xs) = do
     f <- eval x
     r <- case f of 
         (Func n a) -> withCallStack (parseName n) $ do
@@ -148,8 +90,71 @@ quasiquote (MalList (x:xs)) = do
 quasiquote a = eval $ Quote a
 
 eval :: Mal -> Eval MalAtom
-eval mal = do
-    d <- reduce mal
+eval (MalAtom a) = return a
+eval (Var a) = do
+    env <- getEnv
+    case find env a of
+        Nothing -> throw $ UndefinedSymbol a
+        Just a -> return a
+
+eval (MalDef name expr) = do
+    r <- eval expr
+    r <- return $ case r of 
+        Func Nothing body -> Func (Just name) body 
+        _ -> r
+    modifyEnv $ setDefn name r
+    return r
+
+eval (Unset xs) = unsetVar xs
+
+eval (Let xs expr) = withNewDefn (bindDefn xs >> eval expr)
+eval (Do [x]) = eval x
+eval (Do (x:xs)) = eval x >> eval (Do xs)
+
+eval (If cond t f) = do
+    c <- eval cond
+    case c of
+        Boolean False -> eval f
+        Nil -> eval f
+        _ -> eval t
+
+eval (Fn params body) = return . Func Nothing $ \args -> withNewDefn $ do
+    bindArgs params args
+    env <- getEnv
+    value <- eval body
+    return $ case value of
+        (Func a b) -> Func a $ \args -> do
+            putEnv env
+            b args
+        x -> x
+
+eval (MacroDef name v) = do
+    body <- eval v
+    case body of
+        (Func _ proc) -> modifyEnv (setDefn name macro) >> return macro where
+            macro = Macro name $ \args -> do
+                result <- proc args
+                case result of
+                    AtomList ast -> case atom2Mal (AtomList ast) of
+                        Nothing -> throwAtom body
+                        (Just a) -> return a
+                    a -> atom a
+        _ -> throwAtom body
+
+eval (Quote ast) = return $ mal2Atom ast
+eval (QuasiQuote ast) = quasiquote ast
+
+eval (Try body var caught) = catch (eval body) $ \err -> withNewDefn $ do
+    env <- getEnv
+    modifyEnv . setDefn var $ case err of
+        MalError (AtomError value tb) -> AtomError value (tb ++ traceback env)
+        MalError e -> AtomError e (traceback env)
+        e -> AtomError (MalString $ show e) (traceback env)
+    modifyEnv clearTraceback
+    eval caught
+
+eval (MalList xs) = do
+    d <- reduce xs
     case d of
         MalAtom a -> return a
         b -> eval b

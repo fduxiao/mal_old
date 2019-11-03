@@ -9,6 +9,30 @@ import Control.Monad
 import Data.Char
 import AST (Mal(..), MalAtom(..), atom)
 
+readPlainForm :: Parser Mal
+readPlainForm = do
+    t <- peek
+    case t of
+        SpecialChar '(' -> readPlainMalList
+        SpecialChar '[' -> readPlainMalList
+        SemiComma _ -> token >> readPlainForm  -- ignored by readForm
+        EOF -> throw UnexpectedEOF
+        SpecialChar '@' -> token >> do
+            a <- readPlainForm
+            return $ MalList [Var "deref", a]
+        SpecialChar '\'' -> token >> Quote <$> readPlainForm
+        SpecialChar '`' -> token >> QuasiQuote <$> readPlainForm
+        SpecialChar '~' -> token >> do
+            content <- readPlainForm
+            return $ MalList [Var "unquote", content]
+        WaveAt -> token >> do
+            content <- readPlainForm
+            return $ MalList [Var "splice-unquote", content]
+        _ -> readMalAtom
+
+readPlainMalList :: Parser Mal
+readPlainMalList = MalList <$> paren (many readPlainForm)
+
 readForm :: Parser Mal
 readForm = do
     t <- peek
@@ -20,8 +44,8 @@ readForm = do
         SpecialChar '@' -> token >> do
             a <- readForm
             return $ MalList [Var "deref", a]
-        SpecialChar '\'' -> token >> Quote <$> readForm
-        SpecialChar '`' -> token >> QuasiQuote <$> readForm
+        SpecialChar '\'' -> token >> Quote <$> readPlainForm
+        SpecialChar '`' -> token >> QuasiQuote <$> readPlainForm
         SpecialChar '~' -> token >> do
             content <- readForm
             return $ MalList [Var "unquote", content]
@@ -60,6 +84,7 @@ manyArgs = do
 readArgs :: Parser Mal
 readArgs = var <|> paren (MalList <$> manyArgs)
 
+
 readMalList :: Parser Mal
 readMalList = paren $ do
     t <- peek
@@ -89,6 +114,11 @@ readMalList = paren $ do
                 Var name -> MacroDef name <$> readForm
                 (MalList (Var name:params)) -> MacroDef name . Fn (MalList params) <$> readForm
                 form -> throw $ Error "InvalidParamForm" (show form)
+        NonSpecialChars "try*" -> do
+            token
+            t <- readForm
+            (var, c) <- paren $ takeToken (NonSpecialChars "catch*") >> ((,) <$> varName <*> readForm)
+            return $ Try t var c
         _ -> MalList <$> many readForm
 
 parseNumberFloat :: String -> Parser Mal

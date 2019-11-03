@@ -261,7 +261,19 @@ defaultDefn = defnFromList [
             [Number a] -> liftIO . exitWith $ ExitFailure (fromInteger a)
             [_] -> throw ValueError
             _ -> throw InvalidArgNumber,
-        func "concat" concatList
+        func "concat" concatList,
+        func "err?" $ \case
+            [AtomError _ _] -> bool True
+            [_] -> bool False
+            _ -> throw InvalidArgNumber,
+        func "err-value" $ \case
+            [AtomError v _] -> return v
+            [_] -> throw ValueError
+            _ -> throw InvalidArgNumber,
+        func "traceback" $ \case
+            [AtomError _ t] -> return . AtomList $ fmap MalString t
+            [_] -> throw ValueError
+            _ -> throw InvalidArgNumber
     ]
 
 defaultEnv :: IO Env

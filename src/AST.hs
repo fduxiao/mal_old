@@ -86,6 +86,7 @@ data MalAtom =
     | Func (Maybe String) ([MalAtom] -> Eval MalAtom)  -- name and its definition
     | Macro String ([MalAtom] -> Eval Mal)
     | Nil
+    | AtomError MalAtom [Traceback]
     | AtomPtr (Ref.IORef MalAtom)
 
 derefAtom :: MalAtom -> Eval MalAtom
@@ -128,6 +129,7 @@ instance Show MalAtom where
     show (Func Nothing f) = "#<proc>"
     show (Func (Just n) f) = "#<proc:" ++ n ++ ">"
     show (Macro name _) = "macro!<" ++ name ++ ">"
+    show (AtomError error _) = "(throw " ++ show error ++ ")"
     show Nil = "nil"
 
 atomType :: MalAtom -> String
@@ -140,6 +142,7 @@ atomType (Boolean _) = "boolean"
 atomType (Func _ _) = "func"
 atomType (Macro _ _) = "macro"
 atomType Nil = "nil"
+atomType (AtomError _ _) = "error"
 atomType (AtomPtr _) = "atom"
 
 symbol :: (Monad m) => String -> m MalAtom
@@ -178,6 +181,7 @@ data Mal =
     | Quote Mal
     | QuasiQuote Mal
     | MacroDef String Mal
+    | Try Mal String Mal
 
 instance Show Mal where
     show (MalAtom a) = show a
@@ -193,6 +197,7 @@ instance Show Mal where
     show (Quote a) = show a
     show (QuasiQuote a) = show a
     show (MacroDef name body) = "(defmacro! " ++ show name ++ " " ++ show body ++ ")"
+    show (Try t v c) = "(try* " ++ show t ++ "(catch* " ++ v ++ " " ++ show c ++ "))"
 
 
 atom :: (Monad m) => MalAtom -> m Mal
@@ -214,6 +219,7 @@ mal2Atom (Fn params body) = AtomList [Symbol "fn*", mal2Atom params, mal2Atom bo
 mal2Atom (Quote a) = AtomList [Symbol "quote", mal2Atom a]
 mal2Atom (QuasiQuote a) = AtomList [Symbol "quasiquote", mal2Atom a]
 mal2Atom (MacroDef name macro) = AtomList [Symbol "defmacro!", Symbol name, mal2Atom macro]
+mal2Atom (Try t v c) = AtomList [Symbol "try*", mal2Atom t, AtomList [Symbol "catch*", Symbol v, mal2Atom c]]
 
 atom2Mal :: MalAtom -> Maybe Mal
 atom2Mal (Symbol x) = return $ Var x
@@ -245,5 +251,11 @@ atom2Mal (AtomList [Symbol "quasiquote", ast]) = QuasiQuote <$> atom2Mal ast
 atom2Mal (AtomList (Symbol "quasiquote":_)) = Nothing
 atom2Mal (AtomList [Symbol "defmacro!", Symbol name, macro]) = MacroDef name <$> atom2Mal macro
 atom2Mal (AtomList (Symbol "defmacro!":_)) = Nothing
+
+atom2Mal (AtomList [Symbol "try*", t, AtomList [Symbol "catch*", Symbol v, c]]) = do
+   t' <- atom2Mal t
+   c' <- atom2Mal c
+   return $ Try t' v c'
+atom2Mal (AtomList (Symbol "try*":_)) = Nothing 
 atom2Mal (AtomList xs) = MalList <$> mapM atom2Mal xs
 atom2Mal a = atom a
